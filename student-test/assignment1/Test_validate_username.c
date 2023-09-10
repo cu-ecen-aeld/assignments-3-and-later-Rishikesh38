@@ -21,4 +21,5 @@ void test_validate_my_username()
     const char* return_from_conf = malloc_username_from_conf_file();
     const char* return_from_validate = my_username();
     TEST_ASSERT_EQUAL_STRING_MESSAGE(return_from_conf,return_from_validate,"They both are not same");
+    free(return_from_conf);
 }
