@@ -107,8 +107,9 @@ make clean
 make CROSS_COMPILE=${CROSS_COMPILE}
 
 # TODO: Copy the finder related scripts and executables to the /home directory
-cp -r "/home/rishi/aesd/assignment-2-Rishikesh38/finder-app"/* "${OUTDIR}/rootfs/home/"
-cp "/home/rishi/aesd/assignment-2-Rishikesh38/finder-app/conf/username.txt" "${OUTDIR}/rootfs/home/"
+#cp -r "/home/rishi/aesd/assignment-2-Rishikesh38/finder-app"/* "${OUTDIR}/rootfs/home/"
+#cp "/home/rishi/aesd/assignment-2-Rishikesh38/finder-app/conf/username.txt" "${OUTDIR}/rootfs/home/"
+cp -r ./* "${OUTDIR}/rootfs/home/"
 
 # Chown the root directory (if required)
 cd ${OUTDIR}/rootfs
