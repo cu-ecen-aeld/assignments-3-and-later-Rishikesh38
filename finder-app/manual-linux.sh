@@ -35,8 +35,8 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
     git checkout ${KERNEL_VERSION}
     
     # Apply the Git patch
-    echo "Applying the patch"
-    git apply /home/rishi/Downloads/dtc-multiple-definition.patch
+    #echo "Applying the patch"
+    #git apply /home/rishi/Downloads/dtc-multiple-definition.patch
 
     # TODO: Add your kernel build steps here
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} mrproper
