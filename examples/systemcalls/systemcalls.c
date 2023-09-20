@@ -1,4 +1,9 @@
 #include "systemcalls.h"
+#include <stdlib.h> // Include this for the system() function
+#include <unistd.h> // Include this for the fork() function and execv() function
+#include <sys/wait.h> // Include this for the waitpid() function
+#include <fcntl.h> // Include this for the open() function
+
 
 /**
  * @param cmd the command to execute with system()
@@ -10,15 +15,22 @@
 bool do_system(const char *cmd)
 {
 
-/*
- * TODO  add your code here
- *  Call the system() function with the command set in the cmd
- *   and return a boolean true if the system() call completed with success
- *   or false() if it returned a failure
-*/
-
-    return true;
+    // Check if the command is not NULL
+    if (cmd == NULL) 
+    {
+        return false;
+    }
+    int result = system(cmd);
+    if (result == 0) 
+    {
+        return true;
+    } 
+    else 
+    {
+        return false;
+    }
 }
+
 
 /**
 * @param count -The numbers of variables passed to the function. The variables are command to execute.
@@ -38,62 +50,149 @@ bool do_exec(int count, ...)
 {
     va_list args;
     va_start(args, count);
-    char * command[count+1];
-    int i;
-    for(i=0; i<count; i++)
+
+    // Check if the count is valid
+    if (count <= 0) 
     {
-        command[i] = va_arg(args, char *);
+        va_end(args);
+        return false;
     }
-    command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
 
-/*
- * TODO:
- *   Execute a system command by calling fork, execv(),
- *   and wait instead of system (see LSP page 161).
- *   Use the command[0] as the full path to the command to execute
- *   (first argument to execv), and use the remaining arguments
- *   as second argument to the execv() command.
- *
-*/
+    // Create an array to hold the command and its arguments
+    char* command[count + 1]; // +1 for the NULL terminator
+    for (int i = 0; i < count; i++) 
+    {
+        command[i] = va_arg(args, char*);
+    }
+    command[count] = '\0'; // Null-terminate the array
 
-    va_end(args);
+    // Fork a new process
+    pid_t child_pid = fork();
 
-    return true;
+    if (child_pid < 0) 
+    {
+        // Forking failed
+        va_end(args);
+        return false;
+    } 
+    else if (child_pid == 0) 
+    {
+        // This is the child process
+        // Execute the command in the child process
+        execv(command[0], command);
+
+        // If execv() returns, it means an error occurred
+        // Print an error message and exit with failure status
+        perror("execv");
+        exit(EXIT_FAILURE);
+    } 
+    else 
+    {
+        // This is the parent process
+        int status;
+        // Wait for the child process to complete
+        waitpid(child_pid, &status, 0);
+
+        va_end(args);
+
+        // Check if the child process exited successfully
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 0) 
+        {
+            return true;
+        } 
+        else 
+        {
+            return false;
+        }
+    }
 }
+
 
 /**
 * @param outputfile - The full path to the file to write with command output.
 *   This file will be closed at completion of the function call.
 * All other parameters, see do_exec above
 */
+//Credits : Asked GPT to generate the code for this function, the prompt was same as the TODO.
 bool do_exec_redirect(const char *outputfile, int count, ...)
 {
     va_list args;
     va_start(args, count);
-    char * command[count+1];
-    int i;
-    for(i=0; i<count; i++)
+
+    // Check if the count is valid
+    if (count <= 0) 
     {
-        command[i] = va_arg(args, char *);
+        va_end(args);
+        return false;
     }
-    command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
 
+    // Create an array to hold the command and its arguments
+    char* command[count + 1]; // +1 for the NULL terminator
+    for (int i = 0; i < count; i++) 
+    {
+        command[i] = va_arg(args, char*);
+    }
+    command[count] = '\0'; // Null-terminate the array
 
-/*
- * TODO
- *   Call execv, but first using https://stackoverflow.com/a/13784315/1446624 as a refernce,
- *   redirect standard out to a file specified by outputfile.
- *   The rest of the behaviour is same as do_exec()
- *
-*/
+    // Fork a new process
+    pid_t child_pid = fork();
 
-    va_end(args);
+    if (child_pid < 0) 
+    {
+        // Forking failed
+        va_end(args);
+        return false;
+    } 
+    else if (child_pid == 0) 
+    {
+        // This is the child process
 
-    return true;
+        // Open the output file for writing, creating it if it doesn't exist
+        int output_fd = open(outputfile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
+        if (output_fd == -1) 
+        {
+            // Failed to open the output file
+            perror("open");
+            exit(EXIT_FAILURE);
+        }
+
+        // Redirect stdout to the output file using dup2
+        if (dup2(output_fd, STDOUT_FILENO) == -1) 
+        {
+            // Failed to redirect stdout
+            perror("dup2");
+            close(output_fd);
+            exit(EXIT_FAILURE);
+        }
+
+        // Close the output file descriptor
+        close(output_fd);
+
+        // Execute the command in the child process
+        execv(command[0], command);
+
+        // If execv() returns, it means an error occurred
+        perror("execv");
+        exit(EXIT_FAILURE);
+    } 
+    else 
+    {
+        // This is the parent process
+        int status;
+        // Wait for the child process to complete
+        waitpid(child_pid, &status, 0);
+
+        va_end(args);
+
+        // Check if the child process exited successfully
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 0) 
+        {
+            return true;
+        } 
+        else 
+        {
+            return false;
+        }
+    }
 }
