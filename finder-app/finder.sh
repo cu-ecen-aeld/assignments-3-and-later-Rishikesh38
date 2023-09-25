@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 #Take two runtime arguments 
 filesdir="$1"
