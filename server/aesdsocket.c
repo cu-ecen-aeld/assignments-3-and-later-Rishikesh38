@@ -92,9 +92,9 @@ int main(int argc, char *argv[])
 {
     //Opens a syslog with LOG_USER facility  
 	openlog("aesdsocket",0,LOG_USER);
-    int extra_alloc = 1;
-    int initial_alloc_size = 500;
-    int present_location = 0;
+    //int extra_alloc = 1;
+    int initial_alloc_size = 1024;
+    //int present_location = 0;
     int error_flag_getaddr = 0;
     int bytes_read = 0;
     int total_data_len = 0;
@@ -302,16 +302,16 @@ int main(int argc, char *argv[])
             }
 				
 			//If new line is not received, need to keep incrementing the present location to avoid overwritting the previous data received
-			present_location+=bytes_read;
-            extra_alloc++;
-            data_buf = (char*)realloc(data_buf,(extra_alloc*initial_alloc_size)*sizeof(char));
-			if(NULL == data_buf)
-			{
-				syslog(LOG_ERR,"Error: realloc()");
-                free(data_buf);
-                error_handler();
-                exit(ERROR_CODE);
-			}
+			// present_location+=bytes_read;
+            // extra_alloc++;
+            // data_buf = (char*)realloc(data_buf,(extra_alloc*initial_alloc_size)*sizeof(char));
+			// if(NULL == data_buf)
+			// {
+			// 	syslog(LOG_ERR,"Error: realloc()");
+            //     free(data_buf);
+            //     error_handler();
+            //     exit(ERROR_CODE);
+			// }
         }
         if(-1 == bytes_read)
         {
