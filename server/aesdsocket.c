@@ -1,16 +1,15 @@
-#include <stdio.h>
-#include <stdbool.h>
-#include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <netdb.h> //has the struct addrinfo variable here
+#include <netdb.h>
 #include <syslog.h>
 #include <unistd.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <fcntl.h>
 #include <sys/wait.h>
+#include <string.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <getopt.h>
@@ -18,6 +17,7 @@
 
 #define PORT "9000"
 #define BACKLOG 10
+#define INITIAL_ALLOC_SIZE 400
 #define ERROR_CODE -1
 #define DATA_FILE "/var/tmp/aesdsocketdata"
 
@@ -25,6 +25,11 @@
 int main_sockfd = 0;
 int client_sockfd = 0;
 int data_file_fd = 0;
+int extra_alloc = 1;
+int bytes_read = 0;
+int total_data_len = 0;
+struct sockaddr_in client_addr; // client's address information
+char ip_addr[INET6_ADDRSTRLEN];
 
 /*
  * Reference : https://beej.us/guide/bgnet/html/#cb47-58
@@ -39,6 +44,18 @@ void *get_in_addr(struct sockaddr *sa)
 }
 
 /*
+ * This functions cleans up exiting with -1
+ */
+void error_handler()
+{
+    close(client_sockfd);
+    close(main_sockfd);
+    close(data_file_fd);
+    closelog();
+    remove(DATA_FILE);
+}
+
+/*
  *  Executes whenever a  SIGINT or SIGTERM is received
  *  parameter: int sig is the received signal number
  *  NOTE : My initial idea was to keep the signal handler as short as possible. So I just set a flag here and used to ckeck that flag inside while(1)
@@ -47,13 +64,21 @@ void *get_in_addr(struct sockaddr *sa)
  */
 void sig_handler(int sig)
 {
+    if(-1 == close(client_sockfd))
+    {
+        error_handler();
+        perror("close(client_sockfd)");
+        exit(ERROR_CODE); 
+    }
     if(-1 == close(main_sockfd))
     {
+        error_handler();
         perror("close(main_sockfd)");
         exit(ERROR_CODE);  
     }
     if(-1 == close(data_file_fd))
     {
+        error_handler();
         perror("close(data_file_fd)");
         exit(ERROR_CODE);                 
     }
@@ -61,40 +86,17 @@ void sig_handler(int sig)
     syslog(LOG_DEBUG,"Caught signal, exiting");
     closelog();
 
-    if(-1 == unlink(DATA_FILE))
+    if(-1 == remove(DATA_FILE))
     {
         perror("remove(DATA_FILE)");
     }
-    exit(1);
 }
 
-/*
- * This functions cleans up exiting with -1
- */
-void error_handler()
-{
-    close(main_sockfd);
-    close(client_sockfd);
-    close(data_file_fd);
-    closelog();
-    unlink(DATA_FILE);
-}
 int main(int argc, char *argv[])
 {
+    int present_location = 0;
     //Opens a syslog with LOG_USER facility  
 	openlog("aesdsocket",0,LOG_USER);
-    int extra_alloc = 1;
-    int initial_alloc_size = 1024;
-    int present_location = 0;
-    int error_flag_getaddr = 0;
-    int bytes_read = 0;
-    int total_data_len = 0;
-    int yes = 1;
-    char ip_addr[INET6_ADDRSTRLEN];
-    struct addrinfo hints;
-    struct addrinfo *res;
-    struct sockaddr_storage client_addr; // client's address information
-
     /*
      * Use the signal function to establish a signal handler for specific signals 
      * Returns SIG_ERR on failure. On success - returns the previous signal handler (a function pointer)
@@ -133,72 +135,41 @@ int main(int argc, char *argv[])
 		exit(ERROR_CODE);          
     }
 
+    struct addrinfo hints;
+    struct addrinfo *res;
     memset(&hints,0,sizeof(hints)); //make sure the struct is 0 first.
-    hints.ai_family = AF_INET; //Don't care IPv4 or IPv6
+    hints.ai_family = AF_UNSPEC; //Don't care IPv4 or IPv6
     hints.ai_socktype = SOCK_STREAM; //TCP based socket
     hints.ai_flags =  AI_PASSIVE; // fill in my IP for me
-    error_flag_getaddr = getaddrinfo(NULL,PORT,&hints,&res);
-    /*
-     *  Reference for gai_strerror : https://pubs.opengroup.org/onlinepubs/9699919799/functions/gai_strerror.html
-     */
-    if(error_flag_getaddr !=0)
+    if(getaddrinfo(NULL,PORT,&hints,&res) != 0)
     {
-        fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(error_flag_getaddr));
+		perror("getaddrinfo");
+		exit(ERROR_CODE);   
+    }
+
+    //Create a server socket i.e., main_sockfd
+    main_sockfd = socket(res->ai_family,res->ai_socktype,res->ai_protocol);
+    if(-1 == main_sockfd)
+    {
+        perror("socket()");
         exit(ERROR_CODE);
     }
-    for (struct addrinfo *p = res; p != NULL; p = p->ai_next) 
-    {
-        main_sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-        if (main_sockfd == -1) 
-        {
-            perror("socket()");
-            continue;
-        }
-    	if (-1 == setsockopt(main_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int))) 
-	    {	
-		    perror("setsockopt()");
-            close(main_sockfd);
-            continue;
-        }
-        if(-1 == bind(main_sockfd, p->ai_addr, p->ai_addrlen)) 
-        {
-            perror("bind()");
-            close(main_sockfd);
-            continue;
-        }   
-        break;
-    }     
 
-    // //Create a server socket i.e., main_sockfd
-    // main_sockfd = socket(AF_INET,SOCK_STREAM,0);
-    // if(-1 == main_sockfd)
-    // {
-    //     perror("socket()");
-    //     exit(ERROR_CODE);
-    // }
-
-    // /*
-    //  * Reference for setsockopt : https://beej.us/guide/bgnet/html/#getaddrinfoprepare-to-launch
-    //  * To set options on a socket
-    //  */
-	// if (-1 == setsockopt(main_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int))) 
-	// {	
-	// 	perror("setsockopt()");
-    //     exit(ERROR_CODE);
-    // }
-
-    // if(-1 == bind(main_sockfd, res->ai_addr, res->ai_addrlen)) 
-    // {
-    //     perror("bind()");
-    //     freeaddrinfo(res);
-    //     close(main_sockfd);
-    //     exit(ERROR_CODE);
-    // }
-    if(res != NULL)
-    {
-        freeaddrinfo(res); // all done with this structure
+    /*
+     * Reference for setsockopt : https://beej.us/guide/bgnet/html/#getaddrinfoprepare-to-launch
+     * To set options on a socket
+     */
+    int yes = 1;
+	if (-1 == setsockopt(main_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int))) 
+	{	
+		perror("setsockopt()");
     }
 
+    if(-1 == bind(main_sockfd, res->ai_addr, res->ai_addrlen)) 
+    {
+        perror("bind()");
+        exit(ERROR_CODE);
+    }
     
      /* The requirement is that the program should fork after ensuring it can bind to port 9000, so doing it right after the bind step
      * Reference : https://learning.oreilly.com/library/view/linux-system-programming/0596009585/ch05.html#daemons
@@ -206,18 +177,17 @@ int main(int argc, char *argv[])
      */
 	if(argc==2 && (!strcmp(argv[1], "-d")))
 	{
-		pid_t pid;
+		pid_t selfd;
         /* create new process */
-		pid = fork();
-		if (-1 == pid)
+		selfd = fork();
+		if (-1 == selfd)
 		{
 			perror("fork()");
 			exit(ERROR_CODE);
 		}
-		else if (pid != 0 )
+		else if (selfd != 0 )
 		{
-			
-			exit(ERROR_CODE);
+			exit(ERROR_CODE); 
 		}
 
         /* The child process continues execution and performs the following steps to daemonize itself:*/
@@ -247,7 +217,7 @@ int main(int argc, char *argv[])
 	}    
 
     //Create file to push data to /var/tmp/aesdsocketdata
-    data_file_fd = open(DATA_FILE,O_CREAT|O_RDWR,0777);
+    data_file_fd = open(DATA_FILE,O_CREAT|O_RDWR,0644);
 	if(-1 == data_file_fd)
 	{
 	    perror("Error: Couldn't open the file at /var/temp/aesdsocketdata");
@@ -257,12 +227,10 @@ int main(int argc, char *argv[])
     if(-1 == listen(main_sockfd,BACKLOG)) //backlog assumed 10 i.e, >1
     {
         perror("listen()");
-        freeaddrinfo(res);
-        close(main_sockfd);
         exit(ERROR_CODE);
     }
 
-    //freeaddrinfo(res); // all done with this structure
+    freeaddrinfo(res); // all done with this structure
 
     /*
      *    Need a while(1) so that we can accept many client requests and handle them. 
@@ -293,7 +261,7 @@ int main(int argc, char *argv[])
             syslog(LOG_DEBUG,"Accepted connection from %s", ip_addr);
         }
 
-        char *data_buf = (char*)malloc(initial_alloc_size*sizeof(char));
+        char *data_buf = calloc(INITIAL_ALLOC_SIZE,sizeof(char));
         if(NULL == data_buf)
         {
             perror("malloc()");
@@ -312,8 +280,14 @@ int main(int argc, char *argv[])
 			exit(ERROR_CODE);
         }
 
-        while((bytes_read = recv(client_sockfd,data_buf+present_location,initial_alloc_size,0)) > 0)
+        while((bytes_read = recv(client_sockfd,data_buf+present_location,INITIAL_ALLOC_SIZE,0)) > 0)
         {
+            if(-1 == bytes_read)
+            {
+                perror("resv()");
+                error_handler();
+                exit(ERROR_CODE);          
+            }
             /*
              * Reference to strchr function : https://man7.org/linux/man-pages/man3/strchr.3.html
             */
@@ -325,20 +299,13 @@ int main(int argc, char *argv[])
 			//If new line is not received, need to keep incrementing the present location to avoid overwritting the previous data received
 			present_location+=bytes_read;
             extra_alloc++;
-            data_buf = (char*)realloc(data_buf,(extra_alloc*initial_alloc_size)*sizeof(char));
+            data_buf = (char*)realloc(data_buf,((extra_alloc*INITIAL_ALLOC_SIZE)*sizeof(char)));
 			if(NULL == data_buf)
 			{
 				syslog(LOG_ERR,"Error: realloc()");
-                free(data_buf);
                 error_handler();
                 exit(ERROR_CODE);
 			}
-        }
-        if(-1 == bytes_read)
-        {
-            perror("resv()");
-            error_handler();
-            exit(ERROR_CODE);          
         }
 
         //Write the data to /var/tmp/aesdsocketdata
@@ -356,7 +323,7 @@ int main(int argc, char *argv[])
         lseek(data_file_fd, 0, SEEK_SET);
 
         //create a buffer to send data with total size available at /var/tmp/aesdsocketdata
-        char *send_to_client_buf = (char*)malloc(total_data_len*sizeof(char));
+        char *send_to_client_buf = calloc(total_data_len,sizeof(char));
         if(-1 == read(data_file_fd,send_to_client_buf,total_data_len))
         {
 			perror("read()");
@@ -371,8 +338,8 @@ int main(int argc, char *argv[])
 			exit(ERROR_CODE);              
         }
 
-        free(send_to_client_buf);
         free(data_buf);
+        free(send_to_client_buf);
         syslog(LOG_DEBUG,"Closed connection from %s", ip_addr);
 
 		if(-1 == sigprocmask(SIG_UNBLOCK, &sock_set, NULL))
@@ -382,4 +349,5 @@ int main(int argc, char *argv[])
 			exit(ERROR_CODE); 
 		}
     }
+    return 0;
 }

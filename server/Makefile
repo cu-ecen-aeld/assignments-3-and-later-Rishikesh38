@@ -11,7 +11,7 @@ $(TARGET): $(OBJS)
 	$(CROSS_COMPILE)$(CC) -o $@ $^
 
 %.o: %.c
-	$(CROSS_COMPILE)$(CC) -c -o $@ $< -Wall -Werror -g
+	$(CROSS_COMPILE)$(CC) -c -o $@ $< -Wall -Werror
 
 clean:
 	rm -f $(OBJS) $(TARGET)
