@@ -1,3 +1,12 @@
+/**
+ * @file    aesdsocket.c
+ * @brief   This program creates a socket server that listens on port 9000, accepts incoming connections,
+ *          and receives data from clients. It stores the received data in a file at "/var/tmp/aesdsocketdata"
+ *          and sends back the accumulated data to the clients.
+ *			
+ * @date    October 5, 2023
+ * @author  Rishikesh Sundaragiri
+ */
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
@@ -78,6 +87,7 @@ void error_handler()
     closelog();
     remove(DATA_FILE);
 }
+
 int main(int argc, char *argv[])
 {
     //Opens a syslog with LOG_USER facility  
@@ -139,11 +149,13 @@ int main(int argc, char *argv[])
         perror("socket()");
         exit(ERROR_CODE);
     }
+
     memset(&hints,0,sizeof(hints)); //make sure the struct is 0 first.
     hints.ai_family = AF_UNSPEC; //Don't care IPv4 or IPv6
     hints.ai_socktype = SOCK_STREAM; //TCP based socket
     hints.ai_flags =  AI_PASSIVE; // fill in my IP for me
     error_flag_getaddr = getaddrinfo(NULL,PORT,&hints,&res);
+
     /*
      *  Reference for gai_strerror : https://pubs.opengroup.org/onlinepubs/9699919799/functions/gai_strerror.html
      */
@@ -152,6 +164,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(error_flag_getaddr));
         exit(ERROR_CODE);
     }
+
     /*
      * Reference for setsockopt : https://beej.us/guide/bgnet/html/#getaddrinfoprepare-to-launch
      * To set options on a socket
@@ -232,8 +245,6 @@ int main(int argc, char *argv[])
         close(main_sockfd);
         exit(ERROR_CODE);
     }
-
-    //freeaddrinfo(res); // all done with this structure
 
     /*
      *    Need a while(1) so that we can accept many client requests and handle them. 
@@ -322,8 +333,10 @@ int main(int argc, char *argv[])
 
         //Need total data because we need to send back the whole data received till now
         total_data_len += strlen(data_buf);
-        //To make sure we sent the data from start of the file
-        //Move the cursor to start
+
+        /* To make sure we sent the data from start of the file
+         * Move the cursor to start
+		 */
         lseek(data_file_fd, 0, SEEK_SET);
 
         //create a buffer to send data with total size available at /var/tmp/aesdsocketdata
