@@ -21,7 +21,7 @@
 #define ERROR_CODE -1
 #define DATA_FILE "/var/tmp/aesdsocketdata"
 
-static bool signal_received = false;
+
 int main_sockfd = 0;
 int client_sockfd = 0;
 int data_file_fd = 0;
@@ -41,10 +41,30 @@ void *get_in_addr(struct sockaddr *sa)
 /*
  *  Executes whenever a  SIGINT or SIGTERM is received
  *  parameter: int sig is the received signal number
+ *  NOTE : My initial idea was to keep the signal handler as short as possible. So I just set a flag here and used to ckeck that flag inside while(1)
+ *  to detech a signal occurance. But by doing that the Crtl+C command was not working. So I had to put the entire logic of cleanup inside the signal handler 
+ *  to make it work. But I still hesitate to put the cleanup code here because its not safe.
  */
 void sig_handler(int sig)
 {
-    signal_received = true;
+    if(-1 == close(main_sockfd))
+    {
+        perror("close(main_sockfd)");
+        exit(ERROR_CODE);  
+    }
+    if(-1 == close(data_file_fd))
+    {
+        perror("close(data_file_fd)");
+        exit(ERROR_CODE);                 
+    }
+
+    syslog(LOG_DEBUG,"Caught signal, exiting");
+    closelog();
+
+    if(-1 == remove(DATA_FILE))
+    {
+        perror("remove(DATA_FILE)");
+    }
 }
 
 /*
@@ -198,7 +218,7 @@ int main(int argc, char *argv[])
 	}    
 
     //Create file to push data to /var/tmp/aesdsocketdata
-    data_file_fd = open(DATA_FILE,O_CREAT|O_RDWR,0666);
+    data_file_fd = open(DATA_FILE,O_CREAT|O_RDWR,0777);
 	if(-1 == data_file_fd)
 	{
 	    perror("Error: Couldn't open the file at /var/temp/aesdsocketdata");
@@ -220,35 +240,14 @@ int main(int argc, char *argv[])
      */
     while(1)
     {
-        if(signal_received)
-        {
-            if(-1 == close(main_sockfd))
-            {
-              	perror("close(main_sockfd)");
-                exit(ERROR_CODE);  
-            }
-            if(-1 == close(data_file_fd))
-            {
-              	perror("close(data_file_fd)");
-                exit(ERROR_CODE);                 
-            }
-
-            syslog(LOG_DEBUG,"Caught signal, exiting");
-            closelog();
-
-            if(-1 == remove(DATA_FILE))
-            {
-                perror("remove(DATA_FILE)");
-            }
-
-        }
         socklen_t client_len = sizeof(client_addr);
         client_sockfd = accept(main_sockfd,(struct sockaddr*)&client_addr,&client_len);
 
         if (-1 == client_sockfd) 
         {
             perror("accept()");
-            continue; //go back to accepting a client request
+            error_handler();
+            exit(ERROR_CODE);
         }
 
         /*
@@ -257,8 +256,8 @@ int main(int argc, char *argv[])
         if(NULL == inet_ntop(AF_INET, get_in_addr((struct sockaddr*)&client_addr),ip_addr, sizeof(ip_addr)))
         {
             perror("inet_ntop()");
-            close(client_sockfd);
-            continue;
+            error_handler();
+            exit(ERROR_CODE);
         }
         else
         {
