@@ -291,7 +291,7 @@ int main(int argc, char *argv[])
 			exit(ERROR_CODE);
         }
 
-        while((bytes_read = recv(client_sockfd,data_buf+present_location,initial_alloc_size,0)) > 0)
+        while((bytes_read = recv(client_sockfd,data_buf,initial_alloc_size,0)) > 0)
         {
             /*
              * Reference to strchr function : https://man7.org/linux/man-pages/man3/strchr.3.html
@@ -329,13 +329,13 @@ int main(int argc, char *argv[])
         }
 
         //Need total data because we need to send back the whole data received till now
-        total_data_len += strlen(data_buf);
+        //total_data_len += strlen(data_buf);
         //To make sure we sent the data from start of the file
         //Move the cursor to start
         lseek(data_file_fd, 0, SEEK_SET);
 
         //create a buffer to send data with total size available at /var/tmp/aesdsocketdata
-        char *send_to_client_buf = (char*)malloc(total_data_len*sizeof(char));
+        char *send_to_client_buf = (char*)malloc(1024*sizeof(char));
         if(-1 == read(data_file_fd,send_to_client_buf,total_data_len))
         {
 			perror("read()");
