@@ -80,12 +80,12 @@ void sig_handler(int sig)
     }
     syslog(LOG_DEBUG,"Closed connection from %s", ip_addr);
     syslog(LOG_DEBUG,"Caught signal, exiting");
-    closelog();
-
-    if(-1 == remove(DATA_FILE))
+    
+    if(-1 == unlink(DATA_FILE))
     {
-        perror("remove(DATA_FILE)");
+        syslog(LOG_ERR, "Error: Unable to remove data file");
     }
+    closelog();
 }
 
 int main(int argc, char *argv[])
