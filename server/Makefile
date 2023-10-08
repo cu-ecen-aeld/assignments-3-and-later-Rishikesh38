@@ -1,15 +1,19 @@
-CC=$(CROSS_COMPILE)gcc
+CC ?= gcc
+CROSS_COMPILE ?=
 
-CFLAGS= -Wall -Werror
-
-TARGET = aesdsocket 
+TARGET = aesdsocket
+SRCS = aesdsocket.c
+OBJS = $(SRCS:.c=.o)
 
 all: $(TARGET)
-default: $(TARGET)
 
-aesdsocket: aesdsocket.o
-	$(CC) $(CFLAGS) -o aesdsocket aesdsocket.o
+$(TARGET): $(OBJS)
+	$(CROSS_COMPILE)$(CC) -o $@ $^
+
+%.o: %.c
+	$(CROSS_COMPILE)$(CC) -c -o $@ $< -Wall -Werror -g
+
 clean:
-	rm -f *.o $(TARGET)
+	rm -f $(OBJS) $(TARGET)
 
-.PHONY: clean
+.PHONY: all clean
