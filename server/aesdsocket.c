@@ -25,7 +25,7 @@
 int main_sockfd = 0;
 int client_sockfd = 0;
 int data_file_fd = 0;
-
+char ip_addr[INET6_ADDRSTRLEN];
 /*
  * Reference : https://beej.us/guide/bgnet/html/#cb47-58
 */
@@ -39,35 +39,6 @@ void *get_in_addr(struct sockaddr *sa)
 }
 
 /*
- *  Executes whenever a  SIGINT or SIGTERM is received
- *  parameter: int sig is the received signal number
- *  NOTE : My initial idea was to keep the signal handler as short as possible. So I just set a flag here and used to ckeck that flag inside while(1)
- *  to detech a signal occurance. But by doing that the Crtl+C command was not working. So I had to put the entire logic of cleanup inside the signal handler 
- *  to make it work. But I still hesitate to put the cleanup code here because its not safe.
- */
-void sig_handler(int sig)
-{
-    if(-1 == close(main_sockfd))
-    {
-        perror("close(main_sockfd)");
-        exit(ERROR_CODE);  
-    }
-    if(-1 == close(data_file_fd))
-    {
-        perror("close(data_file_fd)");
-        exit(ERROR_CODE);                 
-    }
-
-    syslog(LOG_DEBUG,"Caught signal, exiting");
-    closelog();
-
-    if(-1 == remove(DATA_FILE))
-    {
-        perror("remove(DATA_FILE)");
-    }
-}
-
-/*
  * This functions cleans up exiting with -1
  */
 void error_handler()
@@ -78,6 +49,45 @@ void error_handler()
     closelog();
     remove(DATA_FILE);
 }
+
+/*
+ *  Executes whenever a  SIGINT or SIGTERM is received
+ *  parameter: int sig is the received signal number
+ *  NOTE : My initial idea was to keep the signal handler as short as possible. So I just set a flag here and used to ckeck that flag inside while(1)
+ *  to detech a signal occurance. But by doing that the Crtl+C command was not working. So I had to put the entire logic of cleanup inside the signal handler 
+ *  to make it work. But I still hesitate to put the cleanup code here because its not safe.
+ */
+void sig_handler(int sig)
+{
+    if(-1 == close(client_sockfd))
+    {
+        perror("close(client_sockfd)");
+        error_handler();
+        exit(ERROR_CODE);         
+    }
+    
+    if(-1 == close(main_sockfd))
+    {
+        perror("close(main_sockfd)");
+        error_handler();
+        exit(ERROR_CODE);  
+    }
+    if(-1 == close(data_file_fd))
+    {
+        perror("close(data_file_fd)");
+        error_handler();
+        exit(ERROR_CODE);                 
+    }
+    syslog(LOG_DEBUG,"Closed connection from %s", ip_addr);
+    syslog(LOG_DEBUG,"Caught signal, exiting");
+    closelog();
+
+    if(-1 == remove(DATA_FILE))
+    {
+        perror("remove(DATA_FILE)");
+    }
+}
+
 int main(int argc, char *argv[])
 {
     //Opens a syslog with LOG_USER facility  
@@ -133,14 +143,13 @@ int main(int argc, char *argv[])
 
     //Create a server socket i.e., main_sockfd
     main_sockfd = socket(AF_INET,SOCK_STREAM,0);
-    char ip_addr[INET6_ADDRSTRLEN];
     if(-1 == main_sockfd)
     {
         perror("socket()");
         exit(ERROR_CODE);
     }
     memset(&hints,0,sizeof(hints)); //make sure the struct is 0 first.
-    hints.ai_family = AF_UNSPEC; //Don't care IPv4 or IPv6
+    hints.ai_family = AF_INET; //Don't care IPv4 or IPv6
     hints.ai_socktype = SOCK_STREAM; //TCP based socket
     hints.ai_flags =  AI_PASSIVE; // fill in my IP for me
     error_flag_getaddr = getaddrinfo(NULL,PORT,&hints,&res);
@@ -165,11 +174,10 @@ int main(int argc, char *argv[])
     if(-1 == bind(main_sockfd, res->ai_addr, res->ai_addrlen)) 
     {
         perror("bind()");
-        freeaddrinfo(res);
-        close(main_sockfd);
+        // freeaddrinfo(res);
+        // close(main_sockfd);
         exit(ERROR_CODE);
     }
-    freeaddrinfo(res); // all done with this structure
     
      /* The requirement is that the program should fork after ensuring it can bind to port 9000, so doing it right after the bind step
      * Reference : https://learning.oreilly.com/library/view/linux-system-programming/0596009585/ch05.html#daemons
@@ -218,7 +226,7 @@ int main(int argc, char *argv[])
 	}    
 
     //Create file to push data to /var/tmp/aesdsocketdata
-    data_file_fd = open(DATA_FILE,O_CREAT|O_RDWR,0777);
+    data_file_fd = open(DATA_FILE,O_CREAT|O_RDWR,0644);
 	if(-1 == data_file_fd)
 	{
 	    perror("Error: Couldn't open the file at /var/temp/aesdsocketdata");
@@ -228,12 +236,12 @@ int main(int argc, char *argv[])
     if(-1 == listen(main_sockfd,BACKLOG)) //backlog assumed 10 i.e, >1
     {
         perror("listen()");
-        freeaddrinfo(res);
-        close(main_sockfd);
+        // freeaddrinfo(res);
+        // close(main_sockfd);
         exit(ERROR_CODE);
     }
 
-    //freeaddrinfo(res); // all done with this structure
+    freeaddrinfo(res); // all done with this structure
 
     /*
      *    Need a while(1) so that we can accept many client requests and handle them. 
@@ -344,6 +352,7 @@ int main(int argc, char *argv[])
 
         free(send_to_client_buf);
         free(data_buf);
+        close(client_sockfd);
         syslog(LOG_DEBUG,"Closed connection from %s", ip_addr);
 
 		if(-1 == sigprocmask(SIG_UNBLOCK, &sock_set, NULL))
