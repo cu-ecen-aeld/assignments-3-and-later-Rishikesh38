@@ -61,10 +61,11 @@ void sig_handler(int sig)
     syslog(LOG_DEBUG,"Caught signal, exiting");
     closelog();
 
-    if(-1 == remove(DATA_FILE))
+    if(-1 == unlink(DATA_FILE))
     {
         perror("remove(DATA_FILE)");
     }
+    exit(1);
 }
 
 /*
@@ -76,7 +77,7 @@ void error_handler()
     close(client_sockfd);
     close(data_file_fd);
     closelog();
-    remove(DATA_FILE);
+    unlink(DATA_FILE);
 }
 int main(int argc, char *argv[])
 {
@@ -89,6 +90,7 @@ int main(int argc, char *argv[])
     int bytes_read = 0;
     int total_data_len = 0;
     int yes = 1;
+    char ip_addr[INET6_ADDRSTRLEN];
     struct addrinfo hints;
     struct addrinfo *res;
     struct sockaddr_storage client_addr; // client's address information
@@ -131,16 +133,8 @@ int main(int argc, char *argv[])
 		exit(ERROR_CODE);          
     }
 
-    //Create a server socket i.e., main_sockfd
-    main_sockfd = socket(AF_INET,SOCK_STREAM,0);
-    char ip_addr[INET6_ADDRSTRLEN];
-    if(-1 == main_sockfd)
-    {
-        perror("socket()");
-        exit(ERROR_CODE);
-    }
     memset(&hints,0,sizeof(hints)); //make sure the struct is 0 first.
-    hints.ai_family = AF_UNSPEC; //Don't care IPv4 or IPv6
+    hints.ai_family = AF_INET; //Don't care IPv4 or IPv6
     hints.ai_socktype = SOCK_STREAM; //TCP based socket
     hints.ai_flags =  AI_PASSIVE; // fill in my IP for me
     error_flag_getaddr = getaddrinfo(NULL,PORT,&hints,&res);
@@ -152,24 +146,59 @@ int main(int argc, char *argv[])
         fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(error_flag_getaddr));
         exit(ERROR_CODE);
     }
-    /*
-     * Reference for setsockopt : https://beej.us/guide/bgnet/html/#getaddrinfoprepare-to-launch
-     * To set options on a socket
-     */
-	if (-1 == setsockopt(main_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int))) 
-	{	
-		perror("setsockopt()");
-        exit(ERROR_CODE);
+    for (struct addrinfo *p = res; p != NULL; p = p->ai_next) 
+    {
+        main_sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+        if (main_sockfd == -1) 
+        {
+            perror("socket()");
+            continue;
+        }
+    	if (-1 == setsockopt(main_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int))) 
+	    {	
+		    perror("setsockopt()");
+            close(main_sockfd);
+            continue;
+        }
+        if(-1 == bind(main_sockfd, p->ai_addr, p->ai_addrlen)) 
+        {
+            perror("bind()");
+            close(main_sockfd);
+            continue;
+        }   
+        break;
+    }     
+
+    // //Create a server socket i.e., main_sockfd
+    // main_sockfd = socket(AF_INET,SOCK_STREAM,0);
+    // if(-1 == main_sockfd)
+    // {
+    //     perror("socket()");
+    //     exit(ERROR_CODE);
+    // }
+
+    // /*
+    //  * Reference for setsockopt : https://beej.us/guide/bgnet/html/#getaddrinfoprepare-to-launch
+    //  * To set options on a socket
+    //  */
+	// if (-1 == setsockopt(main_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int))) 
+	// {	
+	// 	perror("setsockopt()");
+    //     exit(ERROR_CODE);
+    // }
+
+    // if(-1 == bind(main_sockfd, res->ai_addr, res->ai_addrlen)) 
+    // {
+    //     perror("bind()");
+    //     freeaddrinfo(res);
+    //     close(main_sockfd);
+    //     exit(ERROR_CODE);
+    // }
+    if(res != NULL)
+    {
+        freeaddrinfo(res); // all done with this structure
     }
 
-    if(-1 == bind(main_sockfd, res->ai_addr, res->ai_addrlen)) 
-    {
-        perror("bind()");
-        freeaddrinfo(res);
-        close(main_sockfd);
-        exit(ERROR_CODE);
-    }
-    freeaddrinfo(res); // all done with this structure
     
      /* The requirement is that the program should fork after ensuring it can bind to port 9000, so doing it right after the bind step
      * Reference : https://learning.oreilly.com/library/view/linux-system-programming/0596009585/ch05.html#daemons
