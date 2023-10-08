@@ -83,7 +83,7 @@ int main(int argc, char *argv[])
     //Opens a syslog with LOG_USER facility  
 	openlog("aesdsocket",0,LOG_USER);
     int extra_alloc = 1;
-    int initial_alloc_size = 500;
+    int initial_alloc_size = 1024;
     int present_location = 0;
     int error_flag_getaddr = 0;
     int bytes_read = 0;
