@@ -295,6 +295,13 @@ int main(int argc, char *argv[])
 
         while((bytes_read = recv(client_sockfd,data_buf+present_location,initial_alloc_size,0)) > 0)
         {
+
+            if(-1 == bytes_read)
+            {
+                perror("resv()");
+                error_handler();
+                exit(ERROR_CODE);          
+            }            
             /*
              * Reference to strchr function : https://man7.org/linux/man-pages/man3/strchr.3.html
             */
@@ -323,7 +330,7 @@ int main(int argc, char *argv[])
         }
 
         //Write the data to /var/tmp/aesdsocketdata
-        if(-1 == write(data_file_fd,data_buf,bytes_read))
+        if(-1 == write(data_file_fd,data_buf,strlen(data_buf)))
         {
 			perror("write()");
 			error_handler();
