@@ -323,7 +323,7 @@ int main(int argc, char *argv[])
         }
 
         //Write the data to /var/tmp/aesdsocketdata
-        if(-1 == write(data_file_fd,data_buf,strlen(data_buf)))
+        if(-1 == write(data_file_fd,data_buf,bytes_read))
         {
 			perror("write()");
 			error_handler();
