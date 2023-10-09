@@ -182,7 +182,6 @@ int main(int argc, char *argv[])
         close(main_sockfd);
         exit(ERROR_CODE);
     }
-    freeaddrinfo(res); // all done with this structure
     
      /* The requirement is that the program should fork after ensuring it can bind to port 9000, so doing it right after the bind step
      * Reference : https://learning.oreilly.com/library/view/linux-system-programming/0596009585/ch05.html#daemons
@@ -245,7 +244,7 @@ int main(int argc, char *argv[])
         close(main_sockfd);
         exit(ERROR_CODE);
     }
-
+    freeaddrinfo(res); // all done with this structure
     /*
      *    Need a while(1) so that we can accept many client requests and handle them. 
      */
