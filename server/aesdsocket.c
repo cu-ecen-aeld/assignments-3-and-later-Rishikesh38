@@ -151,7 +151,7 @@ int main(int argc, char *argv[])
     }
 
     memset(&hints,0,sizeof(hints)); //make sure the struct is 0 first.
-    hints.ai_family = AF_UNSPEC; //Don't care IPv4 or IPv6
+    hints.ai_family = AF_INET; //Don't care IPv4 or IPv6
     hints.ai_socktype = SOCK_STREAM; //TCP based socket
     hints.ai_flags =  AI_PASSIVE; // fill in my IP for me
     error_flag_getaddr = getaddrinfo(NULL,PORT,&hints,&res);
