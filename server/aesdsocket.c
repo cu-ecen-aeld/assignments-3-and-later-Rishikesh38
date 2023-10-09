@@ -366,4 +366,7 @@ int main(int argc, char *argv[])
 			exit(ERROR_CODE); 
 		}
     }
+    return 0;
 }
+
+
