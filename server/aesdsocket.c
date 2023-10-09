@@ -151,7 +151,7 @@ int main(int argc, char *argv[])
     }
 
     memset(&hints,0,sizeof(hints)); //make sure the struct is 0 first.
-    hints.ai_family = AF_UNSPEC; //Don't care IPv4 or IPv6
+    hints.ai_family = AF_INET; //Don't care IPv4 or IPv6
     hints.ai_socktype = SOCK_STREAM; //TCP based socket
     hints.ai_flags =  AI_PASSIVE; // fill in my IP for me
     error_flag_getaddr = getaddrinfo(NULL,PORT,&hints,&res);
@@ -169,7 +169,7 @@ int main(int argc, char *argv[])
      * Reference for setsockopt : https://beej.us/guide/bgnet/html/#getaddrinfoprepare-to-launch
      * To set options on a socket
      */
-	if (-1 == setsockopt(main_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int))) 
+	if (-1 == setsockopt(main_sockfd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &yes, sizeof(int))) 
 	{	
 		perror("setsockopt()");
         exit(ERROR_CODE);
