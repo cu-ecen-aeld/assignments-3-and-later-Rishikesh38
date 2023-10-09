@@ -274,10 +274,10 @@ int main(int argc, char *argv[])
             syslog(LOG_DEBUG,"Accepted connection from %s", ip_addr);
         }
 
-        char *data_buf = (char*)malloc(initial_alloc_size*sizeof(char));
+        char *data_buf = (char*)calloc(initial_alloc_size,sizeof(char));
         if(NULL == data_buf)
         {
-            perror("malloc()");
+            perror("calloc()");
             error_handler();
             exit(ERROR_CODE);
         }
@@ -346,7 +346,7 @@ int main(int argc, char *argv[])
         lseek(data_file_fd, 0, SEEK_SET);
 
         //create a buffer to send data with total size available at /var/tmp/aesdsocketdata
-        char *send_to_client_buf = (char*)malloc(total_data_len*sizeof(char));
+        char *send_to_client_buf = (char*)calloc(total_data_len,sizeof(char));
         if(-1 == read(data_file_fd,send_to_client_buf,total_data_len))
         {
 			perror("read()");
