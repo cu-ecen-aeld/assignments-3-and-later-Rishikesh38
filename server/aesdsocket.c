@@ -24,8 +24,13 @@
 #include <arpa/inet.h>
 #include <getopt.h>
 #include <errno.h>
+#include <time.h>
+#include <pthread.h>	
+#include <sys/time.h>
+#include "queue.h"
 
 #define PORT "9000"
+#define TIME_STRING_SIZE 100
 #define BACKLOG 10
 #define ERROR_CODE -1
 #define DATA_FILE "/var/tmp/aesdsocketdata"
@@ -34,6 +39,50 @@
 int main_sockfd = 0;
 int client_sockfd = 0;
 int data_file_fd = 0;
+pthread_mutex_t mutex;
+timer_t timer_id;
+bool exit_flag = false;
+int initial_alloc_size = 500;
+
+/*
+* Structure that is usefull indicate the data_file_fd. This will be passed as parameter to time_handler
+* so that the timestamp can be written in /var/tmp/aesdsocketdata every 10 secs
+*/
+typedef struct my_data_fd
+{
+    int fd; 
+}my_data_fd;
+
+/*
+* This is the structure that is used to send the parameters to pthread_create function whenever a new 
+* thread is created so that the thread has the details to perform the read and write. 
+*/
+typedef struct thread_entries
+{
+    pthread_t my_thread;
+    bool is_thread_finished;
+    pthread_mutex_t *my_mutex;
+    int fd;
+    int client_sock;
+    char* d_buf;
+    char* send_to_client_buf;
+}thread_entries_t;
+
+/*
+* Reference : The below slist structure is took from lecture video of sample.c code
+*/
+typedef struct slist_data_s {
+    thread_entries_t thread_values;
+    SLIST_ENTRY(slist_data_s) entries;
+} slist_data_t;
+
+/*
+* Declaration of head of the single linked list 
+* Reference : Took from lecture video of sample.c code
+*/
+slist_data_t *datap = NULL;
+SLIST_HEAD(slisthead,slist_data_s) head;
+
 
 /*
  * Reference : https://beej.us/guide/bgnet/html/#cb47-58
@@ -50,29 +99,16 @@ void *get_in_addr(struct sockaddr *sa)
 /*
  *  Executes whenever a  SIGINT or SIGTERM is received
  *  parameter: int sig is the received signal number
- *  NOTE : My initial idea was to keep the signal handler as short as possible. So I just set a flag here and used to ckeck that flag inside while(1)
- *  to detech a signal occurance. But by doing that the Crtl+C command was not working. So I had to put the entire logic of cleanup inside the signal handler 
- *  to make it work. But I still hesitate to put the cleanup code here because its not safe.
+ *  NOTE : I had all my cleanup here but as per professors comments in last assignment
+ *         and the reference he gave me of the shutdown function is been used here
+ * The shutdown function gracefully terminates the server socket after its done doing its task
  */
 void sig_handler(int sig)
 {
-    if(-1 == close(main_sockfd))
+   if(sig == SIGINT || sig == SIGTERM) 
     {
-        perror("close(main_sockfd)");
-        exit(ERROR_CODE);  
-    }
-    if(-1 == close(data_file_fd))
-    {
-        perror("close(data_file_fd)");
-        exit(ERROR_CODE);                 
-    }
-
-    syslog(LOG_DEBUG,"Caught signal, exiting");
-    closelog();
-
-    if(-1 == remove(DATA_FILE))
-    {
-        perror("remove(DATA_FILE)");
+		shutdown(main_sockfd,SHUT_RDWR);
+		exit_flag = true;    
     }
 }
 
@@ -81,27 +117,246 @@ void sig_handler(int sig)
  */
 void error_handler()
 {
+    exit_flag = 1;
     close(main_sockfd);
-    close(client_sockfd);
     close(data_file_fd);
-    closelog();
     remove(DATA_FILE);
+
+    /*
+    * This loop uses the SLIST_FOREACH macro to iterate through a singly-linked list. 
+    * For each element in the list, it checks if the associated thread is still running (threadParams.thread_complete is false) 
+    * and cancels it using pthread_cancel to ensure proper termination during program exit.
+    */
+    SLIST_FOREACH(datap,&head,entries)
+    {
+        if (datap->thread_values.is_thread_finished == false)
+        {
+            pthread_cancel(datap->thread_values.my_thread);
+        }
+    }
+    
+    /*
+    * In this while loop we iterate untill we free up the memory of the whole linked list.
+    * Get the address of the current head, remove it from list and free the memory of it
+    * Repeat it with the next entry(which is new head) untill the list is empty.
+    */
+    while(!SLIST_EMPTY(&head))
+    {
+        datap = SLIST_FIRST(&head);
+        SLIST_REMOVE_HEAD(&head,entries);
+        free(datap);
+    }  
+    pthread_mutex_destroy(&mutex);    
+    timer_delete(timer_id); 
+    closelog();                                     
+}
+
+/*
+* This is the time_handler function which does the job of Append a timestamp in the form “timestamp:time”
+* It will be called every secs by the help of itimer
+*/
+void time_handler(union sigval my_param)
+{
+    my_data_fd* file_des = (my_data_fd*) my_param.sival_ptr;
+    char t_buf[TIME_STRING_SIZE];
+    time_t current_time;
+    struct tm *local_time;
+    int characters_written;
+    /*
+    * The time function takes a single parameter, which is a pointer to a variable of type time_t where it stores the current time. 
+    * The time function returns the current time in seconds.
+    */
+    if(-1 == time(&current_time))
+    {
+        perror("time()");
+        error_handler();
+        exit(ERROR_CODE);
+    }
+
+    /*
+    * The localtime function takes a single parameter, which is a pointer to a time_t variable containing the time you want to convert.
+    * The localtime function returns a pointer to a struct tm representing the time in the local timezone.
+    */
+    local_time = localtime(&current_time);
+    if(NULL == local_time)
+    {
+        perror("localtime()");
+        error_handler();
+        exit(ERROR_CODE);
+    }  
+
+    /*
+    * The strftime function has several parameters:
+       * A pointer to a character array where the formatted time string is stored.
+       * The maximum number of characters to be stored in the character array.
+       * A format string that specifies how the time should be formatted:
+            * %a : Abbreviated weekday name (e.g., "Sun").
+            * %d : Day of the month as a zero-padded decimal number (e.g., "01" for the 1st, "12" for the 12th).
+            * %b : Abbreviated month name (e.g., "Jan" for January).
+            * %Y : Year with century as a decimal number (e.g., "2023").
+            * %T : Time in 24-hour clock format (e.g., "13:45:30").
+            * %z : Time zone offset from UTC (e.g., "+0300" for a 3-hour offset from UTC).
+            *
+       * A pointer to a struct tm representing the time to be formatted.
+    * The strftime function returns the number of characters written to the character array, excluding the null-terminating character.
+    * Reference : https://pubs.opengroup.org/onlinepubs/009695399/utilities/date.html (POSIX standard for date and time formatting).
+    */             
+    characters_written = strftime(t_buf,TIME_STRING_SIZE,"timestamp:%a, %d %b %Y %T %z\n",local_time);
+    if(0 == characters_written)
+    {
+        perror("strftime()");
+        error_handler();
+        exit(ERROR_CODE);
+    }
+
+    //Use mutex lock when using the shared resource i.e., when writing to /var/tmp/aesdsocketdata. 
+    if(-1 == pthread_mutex_lock(&mutex))
+    {
+        perror("pthread_mutex_lock()");
+        error_handler();
+        exit(ERROR_CODE);
+    }
+    if(-1 == write(file_des->fd,t_buf,characters_written))
+    {
+        perror("write()");
+        error_handler();
+        exit(ERROR_CODE);
+    }
+    //Use mutex unlock after using the shared resource i.e., after writing to /var/tmp/aesdsocketdata. 
+    if(-1 == pthread_mutex_unlock(&mutex))
+    {
+        perror("pthread_mutex_unlock()");
+        error_handler();
+        exit(ERROR_CODE);
+    }
+}
+
+void* thread_routine(void *arg)
+{
+    int present_location = 0;
+    int size = 0;
+    int bytes_read = 0;
+    int extra_alloc = 1;
+    thread_entries_t *routine_values = (thread_entries_t*)arg;
+    routine_values->d_buf = calloc(initial_alloc_size,sizeof(char));
+    while((bytes_read = recv(routine_values->client_sock,routine_values->d_buf+present_location,initial_alloc_size,0)) > 0)
+    {
+
+        if(-1 == bytes_read)
+        {
+            perror("resv()");
+            error_handler();
+            exit(ERROR_CODE);          
+        } 
+        //If new line is not received, need to keep incrementing the present location to avoid overwritting the previous data received
+		present_location+=bytes_read;           
+        /*
+        * Reference to strchr function : https://man7.org/linux/man-pages/man3/strchr.3.html
+        */
+        if(strchr(routine_values->d_buf ,'\n') != NULL)
+        {
+            break;
+        }
+				
+        extra_alloc++;
+        routine_values->d_buf = (char*)realloc(routine_values->d_buf,(extra_alloc*initial_alloc_size)*sizeof(char));
+		if(NULL == routine_values->d_buf)
+		{
+			syslog(LOG_ERR,"Error: realloc()");
+            //free(routine_values->d_buf);
+            error_handler();
+            exit(ERROR_CODE);
+		}
+    }
+
+    //Use mutex lock when using the shared resource i.e., when writing to /var/tmp/aesdsocketdata. 
+    if(-1 == pthread_mutex_lock(routine_values->my_mutex))
+    {
+        perror("pthread_mutex_lock()");
+        error_handler();
+        exit(ERROR_CODE);
+    }
+
+    if(-1 == write(routine_values->fd,routine_values->d_buf,present_location))
+    {
+        perror("write()");
+		error_handler();
+		exit(ERROR_CODE);    
+    }
+
+    if(-1 == pthread_mutex_unlock(routine_values->my_mutex))
+    {
+        perror("pthread_mutex_unlock()");
+        error_handler();
+        exit(ERROR_CODE);
+    }    
+
+    /*
+    * Get the lenght of the file and set the cursor to the start of the file
+    */
+    size = lseek(routine_values->fd,0,SEEK_END);
+    lseek(routine_values->fd,0,SEEK_SET);
+    routine_values->send_to_client_buf = calloc(size,sizeof(char));
+
+    //Use mutex lock when using the shared resource i.e., when writing to /var/tmp/aesdsocketdata. 
+    if(-1 == pthread_mutex_lock(routine_values->my_mutex))
+    {
+        perror("pthread_mutex_lock()");
+        error_handler();
+        exit(ERROR_CODE);
+    }
+
+    int readings = read(routine_values->fd, routine_values->send_to_client_buf,size);
+    if(-1 == readings)
+    {
+        perror("read()");
+		error_handler();
+		exit(ERROR_CODE);  
+
+    }
+    if(-1 == send(routine_values->client_sock,routine_values->send_to_client_buf,readings,0)) 
+    {
+        perror("send()");
+		error_handler();
+		exit(ERROR_CODE); 
+    }
+    routine_values->is_thread_finished = true;
+    if(-1 == pthread_mutex_unlock(routine_values->my_mutex))
+    {
+        perror("pthread_mutex_unlock()");
+        error_handler();
+        exit(ERROR_CODE);
+    } 
+    
+    close(routine_values->client_sock);
+    free(routine_values->d_buf);
+    free(routine_values->send_to_client_buf);
+    return arg;
 }
 
 int main(int argc, char *argv[])
 {
     //Opens a syslog with LOG_USER facility  
 	openlog("aesdsocket",0,LOG_USER);
-    int extra_alloc = 1;
-    int initial_alloc_size = 500;
-    int present_location = 0;
+    struct itimerspec itimer;
+    struct timespec start_time;
     int error_flag_getaddr = 0;
-    int bytes_read = 0;
-    int total_data_len = 0;
     int yes = 1;
     struct addrinfo hints;
     struct addrinfo *res;
     struct sockaddr_storage client_addr; // client's address information
+    slist_data_t *loop = NULL;
+    if(pthread_mutex_init(&mutex,NULL) != 0)
+    {
+        perror("pthread_mutex_init()");
+        error_handler();
+        exit(ERROR_CODE);
+    } 
+    /*
+    * This line initializes the head and sets it up for use. It marks the beginning of the list and 
+    * ensures that it's in a proper state to add elements to it using the SLIST_INSERT_HEAD macro.
+    */
+    SLIST_INIT(&head);
 
     /*
      * Use the signal function to establish a signal handler for specific signals 
@@ -119,27 +374,6 @@ int main(int argc, char *argv[])
 		exit(ERROR_CODE);
 	} 
 
-    /*
-     * A variable sock_set of type sigset_t, which is a data structure used to represent a set of signals.
-     * sigemptyset : Used to initialize an empty signal set. It clears all signals from the set.
-     * sigaddset : Used to add specific signals (SIGINT and SIGTERM) to the signal set 
-     */
-    sigset_t sock_set;
-    if(sigemptyset(&sock_set) != 0)
-    {
-		perror("sigemptyset()");
-		exit(ERROR_CODE);        
-    }
-    if(sigaddset(&sock_set,SIGINT) != 0)
-    {
-		perror("sigaddset(): SIGINT ");
-		exit(ERROR_CODE);          
-    }
-    if(sigaddset(&sock_set,SIGTERM) != 0)
-    {
-		perror("sigaddset(): SIGTERM ");
-		exit(ERROR_CODE);          
-    }
 
     //Create a server socket i.e., main_sockfd
     main_sockfd = socket(AF_INET,SOCK_STREAM,0);
@@ -151,7 +385,7 @@ int main(int argc, char *argv[])
     }
 
     memset(&hints,0,sizeof(hints)); //make sure the struct is 0 first.
-    hints.ai_family = AF_INET; //Don't care IPv4 or IPv6
+    hints.ai_family = AF_INET; 
     hints.ai_socktype = SOCK_STREAM; //TCP based socket
     hints.ai_flags =  AI_PASSIVE; // fill in my IP for me
     error_flag_getaddr = getaddrinfo(NULL,PORT,&hints,&res);
@@ -182,8 +416,25 @@ int main(int argc, char *argv[])
         close(main_sockfd);
         exit(ERROR_CODE);
     }
-    
-     /* The requirement is that the program should fork after ensuring it can bind to port 9000, so doing it right after the bind step
+    freeaddrinfo(res); 
+
+    if(-1 == listen(main_sockfd,BACKLOG)) //backlog assumed 10 i.e, >1
+    {
+        perror("listen()");
+        freeaddrinfo(res);
+        close(main_sockfd);
+        exit(ERROR_CODE);
+    }
+
+    //Create file to push data to /var/tmp/aesdsocketdata
+    data_file_fd = open(DATA_FILE,O_CREAT|O_RDWR,0777);
+	if(-1 == data_file_fd)
+	{
+	    perror("Error: Couldn't open the file at /var/temp/aesdsocketdata");
+		exit(ERROR_CODE);
+	}
+
+         /* The requirement is that the program should fork after ensuring it can bind to port 9000, so doing it right after the bind step
      * Reference : https://learning.oreilly.com/library/view/linux-system-programming/0596009585/ch05.html#daemons
      * Credits : The exact code mentioned in the above book is used here to run in deamon mode
      */
@@ -227,27 +478,42 @@ int main(int argc, char *argv[])
 		open ("/dev/null", O_RDWR);     /* stdin */
         dup (0);                        /* stdout */
         dup (0);                        /* stderror */
-	}    
+	}   
 
-    //Create file to push data to /var/tmp/aesdsocketdata
-    data_file_fd = open(DATA_FILE,O_CREAT|O_RDWR,0777);
-	if(-1 == data_file_fd)
-	{
-	    perror("Error: Couldn't open the file at /var/temp/aesdsocketdata");
-		exit(ERROR_CODE);
-	}
-
-    if(-1 == listen(main_sockfd,BACKLOG)) //backlog assumed 10 i.e, >1
-    {
-        perror("listen()");
-        freeaddrinfo(res);
-        close(main_sockfd);
-        exit(ERROR_CODE);
-    }
-    freeaddrinfo(res); // all done with this structure
+    //Setting here so that the data file fd can be passed as a parameter to time_handler
+    my_data_fd timer_data;
+    timer_data.fd = data_file_fd;
     /*
-     *    Need a while(1) so that we can accept many client requests and handle them. 
-     */
+    * struct sigevent is a predefined C structure used for specifying event notification when a timer expires.
+    */
+    struct sigevent my_timer_event;
+    memset(&my_timer_event,0,sizeof(struct sigevent));
+    my_timer_event.sigev_notify = SIGEV_THREAD;
+    my_timer_event.sigev_value.sival_ptr = &timer_data;
+    my_timer_event.sigev_notify_function = time_handler;
+    
+    if(timer_create(CLOCK_MONOTONIC,&my_timer_event,&timer_id) != 0 ) 
+    {
+        perror("timer_create()");
+    }
+    
+    if(clock_gettime(CLOCK_MONOTONIC,&start_time) != 0 ) 
+    {
+        perror("clock_gettime()");
+    } 
+
+    //timer calls the handler for every 10secs
+    itimer.it_value.tv_sec = 10;
+    itimer.it_value.tv_nsec = 0;
+    itimer.it_interval.tv_sec = 10;
+    itimer.it_interval.tv_nsec = 0;  
+
+    
+    if(timer_settime(timer_id, TIMER_ABSTIME, &itimer, NULL ) != 0 ) 
+    {
+        perror("settime error");
+    } 
+
     while(1)
     {
         socklen_t client_len = sizeof(client_addr);
@@ -258,6 +524,11 @@ int main(int argc, char *argv[])
             perror("accept()");
             error_handler();
             exit(ERROR_CODE);
+        }
+
+        if(exit_flag)
+        {
+            break;
         }
 
         /*
@@ -274,104 +545,45 @@ int main(int argc, char *argv[])
             syslog(LOG_DEBUG,"Accepted connection from %s", ip_addr);
         }
 
-        char *data_buf = (char*)calloc(initial_alloc_size,sizeof(char));
-        if(NULL == data_buf)
+        //set the members of single linked list
+        datap = (slist_data_t*)malloc(sizeof(slist_data_t));
+        SLIST_INSERT_HEAD(&head,datap,entries);
+        datap->thread_values.is_thread_finished = false;
+        datap->thread_values.my_mutex = &mutex;
+        datap->thread_values.fd = data_file_fd;
+        datap->thread_values.client_sock = client_sockfd;
+
+        //create the thread
+        if(pthread_create(&(datap->thread_values.my_thread),NULL,&thread_routine,(void*)&(datap->thread_values)) != 0)
         {
-            perror("calloc()");
+            perror("pthread_create()");
             error_handler();
             exit(ERROR_CODE);
         }
 
         /*
-         * For completing any open connection operations i.e., resv() and send(), need to block the signal using sigprocmask()
-         * Blocking doesn't mean we miss the signal, the signal waits until its unblocked and gets serviced by kernel. 
-         */
-		if( -1 == sigprocmask(SIG_BLOCK, &sock_set, NULL))
-        {
-			perror("sigprocmask()");
-			error_handler();
-			exit(ERROR_CODE);
-        }
-
-        while((bytes_read = recv(client_sockfd,data_buf+present_location,initial_alloc_size,0)) > 0)
-        {
-
-            if(-1 == bytes_read)
+        * it iterates through a singly-linked list using SLIST_FOREACH_SAFE, and for each element in the list, 
+        * it waits for the associated thread (referenced by my_thread) to finish using pthread_join. 
+        * If the thread has completed (as indicated by is_thread_finished), it removes the element from the list and frees the associated memory.
+        */
+        SLIST_FOREACH_SAFE(datap,&head,entries,loop)
+		{
+			if(pthread_join(datap->thread_values.my_thread,NULL) !=0)
             {
-                perror("resv()");
-                error_handler();
-                exit(ERROR_CODE);          
-            }            
-            /*
-             * Reference to strchr function : https://man7.org/linux/man-pages/man3/strchr.3.html
-            */
-            if(strchr(data_buf ,'\n') != NULL)
-            {
-                break;
-            }
-				
-			//If new line is not received, need to keep incrementing the present location to avoid overwritting the previous data received
-			present_location+=bytes_read;
-            extra_alloc++;
-            data_buf = (char*)realloc(data_buf,(extra_alloc*initial_alloc_size)*sizeof(char));
-			if(NULL == data_buf)
-			{
-				syslog(LOG_ERR,"Error: realloc()");
-                free(data_buf);
+                perror("pthread_join()");
                 error_handler();
                 exit(ERROR_CODE);
+            }
+			if (true == datap->thread_values.is_thread_finished)
+			{
+				SLIST_REMOVE(&head,datap,slist_data_s,entries);
+				free(datap);
+				datap=NULL;
 			}
-        }
-        if(-1 == bytes_read)
-        {
-            perror("resv()");
-            error_handler();
-            exit(ERROR_CODE);          
-        }
-
-        //Write the data to /var/tmp/aesdsocketdata
-        if(-1 == write(data_file_fd,data_buf,strlen(data_buf)))
-        {
-			perror("write()");
-			error_handler();
-			exit(ERROR_CODE);           
-        }
-
-        //Need total data because we need to send back the whole data received till now
-        total_data_len += strlen(data_buf);
-
-        /* To make sure we sent the data from start of the file
-         * Move the cursor to start
-		 */
-        lseek(data_file_fd, 0, SEEK_SET);
-
-        //create a buffer to send data with total size available at /var/tmp/aesdsocketdata
-        char *send_to_client_buf = (char*)calloc(total_data_len,sizeof(char));
-        if(-1 == read(data_file_fd,send_to_client_buf,total_data_len))
-        {
-			perror("read()");
-			error_handler();
-			exit(ERROR_CODE);              
-        }
-
-        if(-1 == send(client_sockfd,send_to_client_buf,total_data_len, 0))
-        {
-			perror("send()");
-			error_handler();
-			exit(ERROR_CODE);              
-        }
-
-        free(send_to_client_buf);
-        free(data_buf);
-        syslog(LOG_DEBUG,"Closed connection from %s", ip_addr);
-
-		if(-1 == sigprocmask(SIG_UNBLOCK, &sock_set, NULL))
-		{
-			perror("sigprocmask()");
-			error_handler();
-			exit(ERROR_CODE); 
 		}
+	
     }
+    error_handler();
     return 0;
 }
 

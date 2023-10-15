@@ -7,12 +7,15 @@ TARGET = aesdsocket
 SRCS = aesdsocket.c
 OBJS = $(SRCS:.c=.o)
 
+# Additional linker flags
+LDFLAGS = -lpthread -lrt
+
 # Default Target (Build the Executable)
 all: $(TARGET)
 
 # Build the Executable
 $(TARGET): $(OBJS)
-	$(CROSS_COMPILE)$(CC) -o $@ $^
+	$(CROSS_COMPILE)$(CC) -o $@ $^ $(LDFLAGS) 
 
 # Compile Each Source File to Object Files
 %.o: %.c
