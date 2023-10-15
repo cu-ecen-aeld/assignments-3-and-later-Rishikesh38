@@ -4,7 +4,7 @@
  *          and receives data from clients. It stores the received data in a file at "/var/tmp/aesdsocketdata"
  *          and sends back the accumulated data to the clients.
  *			
- * @date    October 5, 2023
+ * @date    October 13, 2023
  * @author  Rishikesh Sundaragiri
  */
 #include <stdio.h>
@@ -476,8 +476,16 @@ int main(int argc, char *argv[])
          */
         /* redirect fd's 0,1,2 to /dev/null */
 		open ("/dev/null", O_RDWR);     /* stdin */
-        dup (0);                        /* stdout */
-        dup (0);                        /* stderror */
+        // dup (0);                        /* stdout */
+        // dup (0);                        /* stderror */
+        // Store the return value
+        int stdout_fd = dup(0); /* stdout */
+        int stderr_fd = dup(0); /* stderr */
+
+        // Use the duplicated file descriptors or suppress the warning by using them
+        (void)stdout_fd; // To suppress the "unused variable" warning
+        (void)stderr_fd; // To suppress the "unused variable" warning
+
 	}   
 
     //Setting here so that the data file fd can be passed as a parameter to time_handler
