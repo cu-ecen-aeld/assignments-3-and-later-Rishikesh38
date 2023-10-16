@@ -1,29 +1,31 @@
-# Compiler and Cross-Compiler Configuration
-CC ?= gcc
-CROSS_COMPILE ?=
+# Compiler variable: CC is the compiler, and it is optional. 
+# $(CROSS_COMPILE) is a prefix that can be set externally to specify a cross-compiler.
+CC ?= $(CROSS_COMPILE)gcc
 
-# Target and Source File Definitions
-TARGET = aesdsocket
-SRCS = aesdsocket.c
-OBJS = $(SRCS:.c=.o)
+# Compiler flags: CFLAGS are optional and include debugging information (-g), enable all warnings (-Wall), and treat warnings as errors (-Werror).
+CFLAGS ?= -g -Wall -Werror
 
-# Additional linker flags
-LDFLAGS = -lpthread -lrt
+# Target binary name: TARGET is the name of the output executable.
+TARGET ?= aesdsocket
 
-# Default Target (Build the Executable)
+# Linker flags: LDFLAGS specify flags to the linker. In this case, it includes -pthread for threading support and -lrt for real-time POSIX functions.
+LDFLAGS ?= -pthread -lrt
+
+# Source file and object file variables
+SRC = aesdsocket
+OBJ = $(SRC).o
+
+# Default target. When you run 'make', it builds the TARGET binary.
 all: $(TARGET)
 
-# Build the Executable
-$(TARGET): $(OBJS)
-	$(CROSS_COMPILE)$(CC) -o $@ $^ $(LDFLAGS) 
+# Rule to build the TARGET binary. It depends on the object file.
+$(TARGET): $(OBJ)
+	$(CC) $(CFLAGS) $(OBJ) -o $(TARGET) $(LDFLAGS)
 
-# Compile Each Source File to Object Files
-%.o: %.c
-	$(CROSS_COMPILE)$(CC) -c -o $@ $< -Wall -Werror
+# Rule to compile the source file into an object file.
+$(OBJ): $(SRC).c
+	$(CC) $(CFLAGS) -c $(SRC).c
 
-# Clean Up Generated Files
+# Clean rule to remove object files and the TARGET binary.
 clean:
-	rm -f $(OBJS) $(TARGET)
-
-# Declare 'all' and 'clean' as Phony Targets (no actual files with these names)
-.PHONY: all clean
+	-rm -f $(OBJ) $(TARGET)
