@@ -576,14 +576,14 @@ int main(int argc, char *argv[])
         */
         SLIST_FOREACH_SAFE(datap,&head,entries,loop)
 		{
-			if(pthread_join(datap->thread_values.my_thread,NULL) !=0)
-            {
-                perror("pthread_join()");
-                error_handler();
-                exit(ERROR_CODE);
-            }
 			if (true == datap->thread_values.is_thread_finished)
 			{
+                if(pthread_join(datap->thread_values.my_thread,NULL) !=0)
+                {
+                    perror("pthread_join()");
+                    error_handler();
+                    exit(ERROR_CODE);
+                }
 				SLIST_REMOVE(&head,datap,slist_data_s,entries);
 				free(datap);
 				datap=NULL;
