@@ -63,7 +63,6 @@ Analysis :
 
 8) The call stack displayed here reveals the sequence of function calls that led to the crash. It illustrates the hierarchical order of function calls that ultimately resulted in the program encountering an issue or crash.
 
-9) 
 
 
 
