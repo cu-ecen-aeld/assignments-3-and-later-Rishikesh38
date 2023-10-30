@@ -128,17 +128,6 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     {
         return -EFAULT;
     }
-
-   /*
-    *  Attempts to acquire a mutex lock. 
-    * If the lock acquisition is interrupted (e.g., by a signal), 
-    * the function returns -EINTR, which indicates an interrupted system call.
-    */
-    if(0 != mutex_lock_interruptible(&aesd_device.lock))
-    {
-        return -EINTR;
-    }
-
     if(!(my_dev->cir_buff_size))
     {
         my_dev->circular_buff = (char *)kmalloc(count, GFP_KERNEL);  // Allocate memory for circular buffer
@@ -150,9 +139,17 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     if(!(my_dev->circular_buff))
     {
         retval = -ENOMEM;
-        goto error_handler;
     }
   
+   /*
+    *  Attempts to acquire a mutex lock. 
+    * If the lock acquisition is interrupted (e.g., by a signal), 
+    * the function returns -EINTR, which indicates an interrupted system call.
+    */
+    if(0 != mutex_lock_interruptible(&aesd_device.lock))
+    {
+        return -EINTR;
+    }
     cb_buffer = (my_dev->circular_buff + my_dev->cir_buff_size);  // Set circular buffer pointer
     if(copy_from_user(cb_buffer, buf, count)) // Copy data from user space to circular buffer kernel level
     {
