@@ -55,7 +55,7 @@ timer_t timer_id;
 #endif
 bool exit_flag = false;
 int initial_alloc_size = 600;
-int size_written = 0
+int size_written = 0;
 
 /*
 * Structure that is usefull indicate the data_file_fd. This will be passed as parameter to time_handler
@@ -256,11 +256,10 @@ void time_handler(union sigval my_param)
 void* thread_routine(void *arg)
 {
     int present_location = 0;
-    int size = 0;
     int bytes_read = 0;
     int extra_alloc = 1;
     thread_entries_t *routine_values = (thread_entries_t*)arg;
-    data_file_fd=open(TEST_FILE,O_CREAT|O_RDWR|O_APPEND,0644);
+    data_file_fd=open(DATA_FILE,O_CREAT|O_RDWR|O_APPEND,0644);
 	if(data_file_fd == -1)
 	{
 		perror("error opening file at /var/temp/aesdsocketdata");
@@ -305,7 +304,7 @@ void* thread_routine(void *arg)
         exit(ERROR_CODE);
     }
 
-    int wri_var = write(data_file_fd,routine_values->d_buf,present_location)
+    int wri_var = write(data_file_fd,routine_values->d_buf,present_location);
 
     if(-1 == wri_var)
     {
@@ -325,7 +324,7 @@ void* thread_routine(void *arg)
     /*
     * Get the lenght of the file and set the cursor to the start of the file
     */
-    size = lseek(data_file_fd,0,SEEK_END);
+    lseek(data_file_fd,0,SEEK_END);
     lseek(data_file_fd,0,SEEK_SET);
     routine_values->send_to_client_buf = malloc(size_written * sizeof(char));
 
@@ -370,8 +369,6 @@ int main(int argc, char *argv[])
 {
     //Opens a syslog with LOG_USER facility  
 	openlog("aesdsocket",0,LOG_USER);
-    struct itimerspec itimer;
-    struct timespec start_time;
     int error_flag_getaddr = 0;
     int yes = 1;
     struct addrinfo hints;
