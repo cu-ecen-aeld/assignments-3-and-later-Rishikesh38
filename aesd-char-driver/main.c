@@ -93,7 +93,6 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 error_handler:
     *f_pos = 0;
     mutex_unlock(&aesd_device.lock);
-    PDEBUG("aesd_read: Return Value %ld", retval);
     return retval;
 }
 
