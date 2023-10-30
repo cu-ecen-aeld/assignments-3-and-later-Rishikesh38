@@ -371,7 +371,7 @@ void* thread_routine(void *arg)
 	if(readings<0)
 	{
 		perror("read():");
-		close_all();
+		error_handler();
 	}
     routine_values->is_thread_finished = true;
     if(-1 == pthread_mutex_unlock(routine_values->my_mutex))
