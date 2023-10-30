@@ -81,7 +81,8 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         goto error_handler;
     }
     buf_cnt = temp_buf->size - entry_offset_byte_rtn;
-    //buf_cnt = (buf_cnt > count) ? count : buf_cnt;
+    buf_cnt = (buf_cnt > count) ? count : buf_cnt;
+    /*
     if(buf_cnt < count)
     {
         *f_pos += buf_cnt;
@@ -91,7 +92,8 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         buf_cnt = count;
         *f_pos += count;
     }
-    //*f_pos += buf_cnt;
+    */
+    *f_pos += buf_cnt;
     /* Copies data to __user buf. Here __user means that the buffer is from user space and acnnot be blindly trusted*/
     if(copy_to_user(buf, temp_buf->buffptr+entry_offset_byte_rtn, buf_cnt))
     {
