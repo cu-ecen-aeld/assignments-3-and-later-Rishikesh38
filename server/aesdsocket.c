@@ -335,7 +335,7 @@ void* thread_routine(void *arg)
         error_handler();
         exit(ERROR_CODE);
     }
-
+    /*
     int readings = read(data_file_fd, routine_values->send_to_client_buf,size_written);
     if(-1 == readings)
     {
@@ -350,6 +350,29 @@ void* thread_routine(void *arg)
 		error_handler();
 		exit(ERROR_CODE); 
     }
+    */
+    int readings; 
+    int read_location = 0;
+    int off_set_send = 0; 
+    while((readings = read(data_file_fd,&routine_values->send_to_client_buf[read_location],1)) > 0)
+    {
+        if(routine_values->send_to_client_buf[read_location] == '\n')
+        {
+            int s_return = send(routine_values->client_sock,routine_values->send_to_client_buf+off_set_send,read_location- off_set_send + 1, 0);
+            if(-1 == s_return)
+            {
+                perror("send()");
+		        error_handler();
+            }
+            off_set_send = read_location + 1;
+        }
+        read_location++;
+    }
+	if(readings<0)
+	{
+		perror("read():");
+		close_all();
+	}
     routine_values->is_thread_finished = true;
     if(-1 == pthread_mutex_unlock(routine_values->my_mutex))
     {
