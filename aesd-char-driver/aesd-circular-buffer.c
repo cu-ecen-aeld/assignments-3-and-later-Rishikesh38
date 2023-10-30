@@ -30,16 +30,18 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
             size_t char_offset, size_t *entry_offset_byte_rtn )
 {
     // Check for null parameters
+    int counter = 0;
+    int buffer_position = 0;
     if (buffer == NULL || entry_offset_byte_rtn == NULL) {
         // Handle the error or return an appropriate value, e.g., NULL
         return NULL;
     }
 
     //Buffer oldest element i.e., oldest entry in the buffer is where we start our search
-    int buffer_position = buffer->out_offs;
+    buffer_position = buffer->out_offs;
     
     //Loop through the buffer handling the wrap around condition
-    for (int counter = 0; counter < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; counter++)
+    for(counter = 0; counter < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; counter++)
     {
         /*
         * If the offset is less than the size of the present entry, the requested character should be in this entry

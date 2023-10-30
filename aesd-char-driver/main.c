@@ -83,7 +83,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     buf_cnt = (buf_cnt > count) ? count : buf_cnt;
     *f_pos += buf_cnt;
     /* Copies data to __user buf. Here __user means that the buffer is from user space and acnnot be blindly trusted*/
-    if(copy_to_user(buf, temp_buff->buffptr+entry_offset_byte_rtn, buf_cnt))
+    if(copy_to_user(buf, temp_buf->buffptr+entry_offset_byte_rtn, buf_cnt))
     {
         retval = -EFAULT;
         goto error_handler;
@@ -101,7 +101,9 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 {
 
     ssize_t retval = 0;
+    int index;
     char *return_buff;
+    char *buffr = NULL;
     struct aesd_buffer_entry write_buf;
     bool new_line_received = false;
     uint32_t line_length = 0;
@@ -113,7 +115,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         return -EFAULT;
     }
     /* dynamically a buffer temporarily that can be used to store user buffer data */
-    char *buffr = (char *)kmalloc(count, GFP_KERNEL);
+    buffr = (char *)kmalloc(count, GFP_KERNEL);
     if(NULL == buffr)
     {
         retval = -ENOMEM;
@@ -137,6 +139,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     }
 
     /* Keep looping to check the '\n'*/
+    
     for(index = 0; index < count; index++)
     {
         if(buffr[index] == '\n')
