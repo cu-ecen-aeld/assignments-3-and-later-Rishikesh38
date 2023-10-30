@@ -77,11 +77,21 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     temp_buf = aesd_circular_buffer_find_entry_offset_for_fpos(&my_dev->buffer, *f_pos, &entry_offset_byte_rtn);
     if(temp_buf == NULL)
     {
+        *f_pos = 0;
         goto error_handler;
     }
     buf_cnt = temp_buf->size - entry_offset_byte_rtn;
-    buf_cnt = (buf_cnt > count) ? count : buf_cnt;
-    *f_pos += buf_cnt;
+    //buf_cnt = (buf_cnt > count) ? count : buf_cnt;
+    if(buf_cnt < count)
+    {
+        *f_pos += buf_cnt;
+    }
+    else
+    {
+        buf_cnt = count;
+        *f_pos += count;
+    }
+    //*f_pos += buf_cnt;
     /* Copies data to __user buf. Here __user means that the buffer is from user space and acnnot be blindly trusted*/
     if(copy_to_user(buf, temp_buf->buffptr+entry_offset_byte_rtn, buf_cnt))
     {
@@ -91,37 +101,33 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 
     retval = buf_cnt;
 error_handler:
-    *f_pos = 0;
     mutex_unlock(&aesd_device.lock);
     return retval;
 }
 
+/* Reference : Used ChatGPT in this code to kmalloc, krealloc and the '\n' line identification
+ * Prompt : Gave the function signiture as input, asked to generate a code to dynalically alloc and loop for new line. 
+ */
 ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
                 loff_t *f_pos)
 {
-
     ssize_t retval = 0;
-    int index;
-    char *return_buff;
-    char *buffr = NULL;
-    struct aesd_buffer_entry write_buf;
-    bool new_line_received = false;
-    uint32_t line_length = 0;
-    struct aesd_dev *my_dev;
+    struct aesd_dev *my_dev = NULL;                
+    int null_received = 0;    
+    char *return_buff = NULL;                   
+    char *cb_buffer = NULL;  
+	struct aesd_buffer_entry write_buf; 	
+    int index = 0;
+	int len_rec = 0;  
     PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
+    
     my_dev = filp->private_data;
     if(!my_dev)
     {
         return -EFAULT;
     }
-    /* dynamically a buffer temporarily that can be used to store user buffer data */
-    buffr = (char *)kmalloc(count, GFP_KERNEL);
-    if(NULL == buffr)
-    {
-        retval = -ENOMEM;
-    }
-    
-    /*
+
+   /*
     *  Attempts to acquire a mutex lock. 
     * If the lock acquisition is interrupted (e.g., by a signal), 
     * the function returns -EINTR, which indicates an interrupted system call.
@@ -131,84 +137,56 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         return -EINTR;
     }
 
-    /* copy the data from user buffer to kernel buffer*/
-    if(copy_from_user(buffr, buf, count))
+    if(!(my_dev->cir_buff_size))
+    {
+        my_dev->circular_buff = (char *)kmalloc(count, GFP_KERNEL);  // Allocate memory for circular buffer
+    }
+    else
+    {
+        my_dev->circular_buff = (char *)krealloc(my_dev->circular_buff, my_dev->cir_buff_size + count, GFP_KERNEL); // Re-Allocate memory for circular buffer
+    }
+    if(!(my_dev->circular_buff))
+    {
+        retval = -ENOMEM;
+        goto error_handler;
+    }
+  
+    cb_buffer = (my_dev->circular_buff + my_dev->cir_buff_size);  // Set circular buffer pointer
+    if(copy_from_user(cb_buffer, buf, count)) // Copy data from user space to circular buffer kernel level
     {
         retval = -EFAULT;
-        goto wr_error_handler;
+        goto error_handler;
     }
-
-    /* Keep looping to check the '\n'*/
-    
     for(index = 0; index < count; index++)
     {
-        if(buffr[index] == '\n')
+        if(cb_buffer[index] == '\n') // Check for null character
         {
-            new_line_received = true;
-            line_length = index+1;
+            null_received = 1;
+            len_rec = index+1;
             break;
         }
     }
-    /* alloc for the first time*/
-    if(0 == my_dev->cir_buff_size)
+    if(null_received)
     {
-        my_dev->circular_buff = (char *)kmalloc(count, GFP_KERNEL);
-        if(NULL == my_dev->circular_buff)
-        {
-            retval = -ENOMEM;
-            goto wr_error_handler;
-        }
-        /* Copy from kernel temp buffer to dev*/
-        memcpy(my_dev->circular_buff, buffr, count);
-        my_dev->cir_buff_size += count;
-    }
-    /* Space not enough and need to realloc */
-    else
-    {
-        /* If the '\n' is received then realloc only the received size, else do the count size*/
-        if(new_line_received)
-        {
-            my_dev->circular_buff = (char *)krealloc(my_dev->circular_buff, my_dev->cir_buff_size + line_length, GFP_KERNEL);
-            if(NULL == my_dev->circular_buff)
-            {
-                retval = -ENOMEM;
-                goto wr_error_handler;
-            }
-            /* Copy from kernel temp buffer to dev*/
-            memcpy(my_dev->circular_buff + my_dev->cir_buff_size, buffr, line_length);
-            my_dev->cir_buff_size += line_length;
-        }
-        else
-        {
-            my_dev->circular_buff = (char *)krealloc(my_dev->circular_buff, my_dev->cir_buff_size + count, GFP_KERNEL);
-            if(NULL == my_dev->circular_buff)
-            {
-                retval = -ENOMEM;
-                goto wr_error_handler;
-            }
-            /* Copy from kernel temp buffer to dev*/
-            memcpy(my_dev->circular_buff + my_dev->cir_buff_size, buffr, count);
-            my_dev->cir_buff_size += count;            
-        }
-    }
-    /* As the line is completed, need to be added to the circular buffer*/
-    if(new_line_received)
-    {
+        my_dev->cir_buff_size += len_rec; // Update circular buffer size
         write_buf.buffptr = my_dev->circular_buff;
         write_buf.size = my_dev->cir_buff_size;
-        return_buff = aesd_circular_buffer_add_entry(&my_dev->buffer, &write_buf);
-        /* Handing overwritten case below*/
-        if(return_buff != NULL )
+        return_buff = aesd_circular_buffer_add_entry(&(my_dev->buffer), &write_buf);
+        if((return_buff) && (my_dev->buffer.full))
         {
-            kfree(return_buff);
+            kfree(return_buff); // Free return buffer if the circular buffer is full
+            return_buff = NULL;
         }
-        /* Free the size*/
-        my_dev->cir_buff_size = 0;
+        my_dev->cir_buff_size = 0; // Reset circular buffer size
     }
-    retval = count;
-    wr_error_handler : kfree(buffr);
+    else
+    {
+        my_dev->cir_buff_size  += count; // Update circular buffer size
+    }
+    retval = count; // Set the return value to the number of bytes written
+error_handler:
+    mutex_unlock(&aesd_device.lock);  // Release the mutex lock
     return retval;
-    
 }
 
 
