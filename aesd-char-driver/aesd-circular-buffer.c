@@ -78,15 +78,20 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 */
 char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
 {
-    char *result;
+    char *result = NULL;
     // Check for null pointers
     if (buffer == NULL || add_entry == NULL)
     {
-        return NULL;
+        return result;
     }
     if(buffer->full)
     {
-        result = buffer->entry[buffer->in_offs].buffptr;
+        result = (char *)buffer->entry[buffer->out_offs].buffptr;
+        buffer->out_offs++;
+        if(buffer->out_offs == AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED)
+        {
+            buffer->out_offs = 0;
+        }
     }
     /* Store inside the circular buffer (both buffptr and size)*/
 	buffer->entry[buffer->in_offs] = *add_entry;
@@ -94,11 +99,11 @@ char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const 
     buffer->in_offs = (buffer->in_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
 
     /* Increment the Tail or output pointer if the buffer is full*/
-    if(buffer->full)
+    /* if(buffer->full)
     {
         buffer->out_offs = (buffer->out_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
     }
-
+    */
     /* Always check if the in and out are pointing to same element and make sure the full is set in this case*/
     if((!(buffer->full)) && (buffer->in_offs == buffer->out_offs))
     {
