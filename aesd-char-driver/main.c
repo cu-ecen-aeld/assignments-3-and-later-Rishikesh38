@@ -54,6 +54,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     struct aesd_buffer_entry *temp_buf = NULL;
     ssize_t entry_offset_byte_rtn = 0, buf_cnt = 0;
     struct aesd_dev *my_dev = filp->private_data;
+    /* Safety check for pointer*/
     if(!my_dev)
     {
         return -EFAULT;
@@ -82,19 +83,8 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     }
     buf_cnt = temp_buf->size - entry_offset_byte_rtn;
     buf_cnt = (buf_cnt > count) ? count : buf_cnt;
-    /*
-    if(buf_cnt < count)
-    {
-        *f_pos += buf_cnt;
-    }
-    else
-    {
-        buf_cnt = count;
-        *f_pos += count;
-    }
-    */
     *f_pos += buf_cnt;
-    /* Copies data to __user buf. Here __user means that the buffer is from user space and acnnot be blindly trusted*/
+    /* Copies data to __user buf. Here __user means that the buffer is from user space and cannot be blindly trusted*/
     if(copy_to_user(buf, temp_buf->buffptr+entry_offset_byte_rtn, buf_cnt))
     {
         retval = -EFAULT;
@@ -225,6 +215,8 @@ int aesd_init_module(void)
         return result;
     }
     memset(&aesd_device,0,sizeof(struct aesd_dev));
+
+    /* Init the mutex and aesd buffer*/
     mutex_init(&aesd_device.lock);
     aesd_circular_buffer_init(&(aesd_device.buffer));
 
