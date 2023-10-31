@@ -29,20 +29,33 @@
 #include <sys/time.h>
 #include "queue.h"
 
+/* Make this zero for regular socket implementation*/
+#define USE_AESD_CHAR_DEVICE 1
+
 #define PORT "9000"
 #define TIME_STRING_SIZE 100
 #define BACKLOG 10
 #define ERROR_CODE -1
-#define DATA_FILE "/var/tmp/aesdsocketdata"
+#if USE_AESD_CHAR_DEVICE
+#   define DATA_FILE "/dev/aesdchar"
+#else
+#   define DATA_FILE "/var/tmp/aesdsocketdata"
+#endif
+
+
 
 
 int main_sockfd = 0;
 int client_sockfd = 0;
 int data_file_fd = 0;
 pthread_mutex_t mutex;
+#if USE_AESD_CHAR_DEVICE
+#else
 timer_t timer_id;
+#endif
 bool exit_flag = false;
-int initial_alloc_size = 500;
+int initial_alloc_size = 600;
+int size_written = 0;
 
 /*
 * Structure that is usefull indicate the data_file_fd. This will be passed as parameter to time_handler
@@ -119,8 +132,11 @@ void error_handler()
 {
     exit_flag = 1;
     close(main_sockfd);
+    #if USE_AESD_CHAR_DEVICE
+	#else
     close(data_file_fd);
     remove(DATA_FILE);
+    #endif
 
     /*
     * This loop uses the SLIST_FOREACH macro to iterate through a singly-linked list. 
@@ -147,7 +163,10 @@ void error_handler()
         free(datap);
     }  
     pthread_mutex_destroy(&mutex);    
+    #if USE_AESD_CHAR_DEVICE
+    #else
     timer_delete(timer_id); 
+    #endif
     closelog();                                     
 }
 
@@ -155,6 +174,8 @@ void error_handler()
 * This is the time_handler function which does the job of Append a timestamp in the form “timestamp:time”
 * It will be called every secs by the help of itimer
 */
+#if USE_AESD_CHAR_DEVICE
+#else
 void time_handler(union sigval my_param)
 {
     my_data_fd* file_des = (my_data_fd*) my_param.sival_ptr;
@@ -230,15 +251,21 @@ void time_handler(union sigval my_param)
         exit(ERROR_CODE);
     }
 }
+#endif
 
 void* thread_routine(void *arg)
 {
     int present_location = 0;
-    int size = 0;
     int bytes_read = 0;
     int extra_alloc = 1;
     thread_entries_t *routine_values = (thread_entries_t*)arg;
-    routine_values->d_buf = calloc(initial_alloc_size,sizeof(char));
+    data_file_fd=open(DATA_FILE,O_CREAT|O_RDWR|O_APPEND,0644);
+	if(data_file_fd == -1)
+	{
+		perror("error opening file at /var/temp/aesdsocketdata");
+		exit(ERROR_CODE);
+	}
+    routine_values->d_buf = malloc(initial_alloc_size * sizeof(char));
     while((bytes_read = recv(routine_values->client_sock,routine_values->d_buf+present_location,initial_alloc_size,0)) > 0)
     {
 
@@ -277,12 +304,15 @@ void* thread_routine(void *arg)
         exit(ERROR_CODE);
     }
 
-    if(-1 == write(routine_values->fd,routine_values->d_buf,present_location))
+    int wri_var = write(data_file_fd,routine_values->d_buf,present_location);
+
+    if(-1 == wri_var)
     {
         perror("write()");
 		error_handler();
 		exit(ERROR_CODE);    
     }
+    size_written += wri_var;
 
     if(-1 == pthread_mutex_unlock(routine_values->my_mutex))
     {
@@ -294,9 +324,9 @@ void* thread_routine(void *arg)
     /*
     * Get the lenght of the file and set the cursor to the start of the file
     */
-    size = lseek(routine_values->fd,0,SEEK_END);
-    lseek(routine_values->fd,0,SEEK_SET);
-    routine_values->send_to_client_buf = calloc(size,sizeof(char));
+    lseek(data_file_fd,0,SEEK_END);
+    lseek(data_file_fd,0,SEEK_SET);
+    routine_values->send_to_client_buf = malloc(size_written * sizeof(char));
 
     //Use mutex lock when using the shared resource i.e., when writing to /var/tmp/aesdsocketdata. 
     if(-1 == pthread_mutex_lock(routine_values->my_mutex))
@@ -305,8 +335,8 @@ void* thread_routine(void *arg)
         error_handler();
         exit(ERROR_CODE);
     }
-
-    int readings = read(routine_values->fd, routine_values->send_to_client_buf,size);
+    /*
+    int readings = read(data_file_fd, routine_values->send_to_client_buf,size_written);
     if(-1 == readings)
     {
         perror("read()");
@@ -320,6 +350,29 @@ void* thread_routine(void *arg)
 		error_handler();
 		exit(ERROR_CODE); 
     }
+    */
+    int readings; 
+    int read_location = 0;
+    int off_set_send = 0; 
+    while((readings = read(data_file_fd,&routine_values->send_to_client_buf[read_location],1)) > 0)
+    {
+        if(routine_values->send_to_client_buf[read_location] == '\n')
+        {
+            int s_return = send(routine_values->client_sock,routine_values->send_to_client_buf+off_set_send,read_location- off_set_send + 1, 0);
+            if(-1 == s_return)
+            {
+                perror("send()");
+		        error_handler();
+            }
+            off_set_send = read_location + 1;
+        }
+        read_location++;
+    }
+	if(readings<0)
+	{
+		perror("read():");
+		error_handler();
+	}
     routine_values->is_thread_finished = true;
     if(-1 == pthread_mutex_unlock(routine_values->my_mutex))
     {
@@ -328,6 +381,7 @@ void* thread_routine(void *arg)
         exit(ERROR_CODE);
     } 
     
+    close(data_file_fd);
     close(routine_values->client_sock);
     free(routine_values->d_buf);
     free(routine_values->send_to_client_buf);
@@ -338,8 +392,6 @@ int main(int argc, char *argv[])
 {
     //Opens a syslog with LOG_USER facility  
 	openlog("aesdsocket",0,LOG_USER);
-    struct itimerspec itimer;
-    struct timespec start_time;
     int error_flag_getaddr = 0;
     int yes = 1;
     struct addrinfo hints;
@@ -426,13 +478,6 @@ int main(int argc, char *argv[])
         exit(ERROR_CODE);
     }
 
-    //Create file to push data to /var/tmp/aesdsocketdata
-    data_file_fd = open(DATA_FILE,O_CREAT|O_RDWR,0777);
-	if(-1 == data_file_fd)
-	{
-	    perror("Error: Couldn't open the file at /var/temp/aesdsocketdata");
-		exit(ERROR_CODE);
-	}
 
          /* The requirement is that the program should fork after ensuring it can bind to port 9000, so doing it right after the bind step
      * Reference : https://learning.oreilly.com/library/view/linux-system-programming/0596009585/ch05.html#daemons
@@ -487,7 +532,8 @@ int main(int argc, char *argv[])
         (void)stderr_fd; // To suppress the "unused variable" warning
 
 	}   
-
+	#if USE_AESD_CHAR_DEVICE
+	#else
     //Setting here so that the data file fd can be passed as a parameter to time_handler
     my_data_fd timer_data;
     timer_data.fd = data_file_fd;
@@ -521,7 +567,7 @@ int main(int argc, char *argv[])
     {
         perror("settime error");
     } 
-
+    #endif
     while(1)
     {
         socklen_t client_len = sizeof(client_addr);
@@ -558,7 +604,7 @@ int main(int argc, char *argv[])
         SLIST_INSERT_HEAD(&head,datap,entries);
         datap->thread_values.is_thread_finished = false;
         datap->thread_values.my_mutex = &mutex;
-        datap->thread_values.fd = data_file_fd;
+        //datap->thread_values.fd = data_file_fd;
         datap->thread_values.client_sock = client_sockfd;
 
         //create the thread
@@ -576,14 +622,14 @@ int main(int argc, char *argv[])
         */
         SLIST_FOREACH_SAFE(datap,&head,entries,loop)
 		{
+            if(pthread_join(datap->thread_values.my_thread,NULL) !=0)
+            {
+                perror("pthread_join()");
+                error_handler();
+                exit(ERROR_CODE);
+            }
 			if (true == datap->thread_values.is_thread_finished)
 			{
-                if(pthread_join(datap->thread_values.my_thread,NULL) !=0)
-                {
-                    perror("pthread_join()");
-                    error_handler();
-                    exit(ERROR_CODE);
-                }
 				SLIST_REMOVE(&head,datap,slist_data_s,entries);
 				free(datap);
 				datap=NULL;
