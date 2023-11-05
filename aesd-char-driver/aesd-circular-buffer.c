@@ -74,28 +74,34 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 /**
 * Adds entry @param add_entry to @param buffer in the location specified in buffer->in_offs.
 * If the buffer was already full, overwrites the oldest entry and advances buffer->out_offs to the
-* new start location.
+* new start location. 
 * Any necessary locking must be handled by the caller
 * Any memory referenced in @param add_entry must be allocated by and/or must have a lifetime managed by the caller.
+* @return Retuns the over return entry if in = out or else NULL. 
 */
-char *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
+struct aesd_buffer_entry *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
 {
-    char *result = NULL;
+    struct aesd_buffer_entry *result = NULL;
     // Check for null pointers
     if (buffer == NULL || add_entry == NULL)
     {
         return result;
     }
+    /*
+    * If the buffer is full then overwrite the old entry ith new. 
+    * Increment the out so that it always points to the oldest entry
+    * Result points to the overwritten entry allow the caller to handle it or clean up any resources associated with it.
+    */
     if(buffer->full)
     {
-        result = (char *)buffer->entry[buffer->out_offs].buffptr;
-	/* Increment the out pointer */
-	buffer->out_offs++;
-	/* Handle the wrap around */
-	if(buffer->out_offs == AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED)
-	{
-		buffer->out_offs = 0;
-	}
+        result = &(buffer->entry[buffer->out_offs]);
+	    /* Increment the out pointer */
+	    buffer->out_offs++;
+	    /* Handle the wrap around */
+	    if(buffer->out_offs == AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED)
+	    {
+		    buffer->out_offs = 0;
+	    }
     }
     /* Store inside the circular buffer (both buffptr and size)*/
     buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;

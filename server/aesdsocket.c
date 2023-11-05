@@ -28,6 +28,8 @@
 #include <pthread.h>	
 #include <sys/time.h>
 #include "queue.h"
+#include "../aesd-char-driver/aesd_ioctl.h"
+
 
 /* Make this zero for regular socket implementation*/
 #define USE_AESD_CHAR_DEVICE 1
@@ -290,10 +292,33 @@ void* thread_routine(void *arg)
 		if(NULL == routine_values->d_buf)
 		{
 			syslog(LOG_ERR,"Error: realloc()");
-            //free(routine_values->d_buf);
             error_handler();
             exit(ERROR_CODE);
 		}
+    }
+
+    /* Logic for checking the IOCTL command : A9*/
+    char *tmp_buff = routine_values->d_buf;
+    char *ioctl_string =  "AESDCHAR_IOCSEEKTO:";
+    bool ioctl_received = false;
+    /* Compare the buffer we received from client with the ioctl command and see if they match */
+    if(0 == strncmp(tmp_buff, ioctl_string, strlen(ioctl_string)))
+    {
+        /* Line by line explanation
+        *  Create a seek that can store write cmd and offset
+        *  Point to the seek members i.e., write_cmd and offset, by adding command lenght to received string 
+        * AESDCHAR_IOCSEEKTO:X,Y += AESDCHAR_IOCSEEKTO will result in pointing to X,Y i.e,  write_cmd and offset.
+        * Using sscanf we can parse the tmp_buf using comma ',' as the seperator and get X and Y (write_cmd and offset) values seperately.
+        * Set the ioctl received flag to true. 
+        */
+        struct aesd_seekto seek;            
+        tmp_buff += strlen(ioctl_string);    
+        sscanf(tmp_buff, "%d,%d", &seek.write_cmd, &seek.write_cmd_offset);
+        if(ioctl(data_file_fd, AESDCHAR_IOCSEEKTO, &seek))
+        {
+            perror("ioctl()");
+        }
+        ioctl_received = true;
     }
 
     //Use mutex lock when using the shared resource i.e., when writing to /var/tmp/aesdsocketdata. 
@@ -304,8 +329,12 @@ void* thread_routine(void *arg)
         exit(ERROR_CODE);
     }
 
-    int wri_var = write(data_file_fd,routine_values->d_buf,present_location);
-
+    /* Assignment specification : Do not write this string command into the aesdchar device as you do with other strings sent to the socket*/
+    if(!ioctl_received)
+    {
+        int wri_var = write(data_file_fd,routine_values->d_buf,present_location);
+    }
+    
     if(-1 == wri_var)
     {
         perror("write()");
@@ -335,22 +364,6 @@ void* thread_routine(void *arg)
         error_handler();
         exit(ERROR_CODE);
     }
-    /*
-    int readings = read(data_file_fd, routine_values->send_to_client_buf,size_written);
-    if(-1 == readings)
-    {
-        perror("read()");
-		error_handler();
-		exit(ERROR_CODE);  
-
-    }
-    if(-1 == send(routine_values->client_sock,routine_values->send_to_client_buf,readings,0)) 
-    {
-        perror("send()");
-		error_handler();
-		exit(ERROR_CODE); 
-    }
-    */
     int readings; 
     int read_location = 0;
     int off_set_send = 0; 
