@@ -260,6 +260,7 @@ void* thread_routine(void *arg)
     int present_location = 0;
     int bytes_read = 0;
     int extra_alloc = 1;
+    int wri_var = 0;
     thread_entries_t *routine_values = (thread_entries_t*)arg;
     data_file_fd=open(DATA_FILE,O_CREAT|O_RDWR|O_APPEND,0644);
 	if(data_file_fd == -1)
@@ -332,7 +333,7 @@ void* thread_routine(void *arg)
     /* Assignment specification : Do not write this string command into the aesdchar device as you do with other strings sent to the socket*/
     if(!ioctl_received)
     {
-        int wri_var = write(data_file_fd,routine_values->d_buf,present_location);
+        wri_var = write(data_file_fd,routine_values->d_buf,present_location);
     }
     
     if(-1 == wri_var)
