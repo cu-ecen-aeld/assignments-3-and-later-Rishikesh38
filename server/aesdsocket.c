@@ -354,8 +354,8 @@ void* thread_routine(void *arg)
     /*
     * Get the lenght of the file and set the cursor to the start of the file
     */
-    lseek(data_file_fd,0,SEEK_END);
-    lseek(data_file_fd,0,SEEK_SET);
+    //lseek(data_file_fd,0,SEEK_END);
+    //lseek(data_file_fd,0,SEEK_SET);
     routine_values->send_to_client_buf = malloc(size_written * sizeof(char));
 
     //Use mutex lock when using the shared resource i.e., when writing to /var/tmp/aesdsocketdata. 
